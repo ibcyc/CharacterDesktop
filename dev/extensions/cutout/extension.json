@@ -1,12 +1,12 @@
 {
   "id": "cutout",
   "name": "圖片去背",
-  "site": "源自留白去背工具，在這台電腦上執行，照片不會上傳",
+  "site": "由作者自己的留白去背工具改寫，在這台電腦上執行，照片不會上傳",
   "credits": [
     { "name": "BiRefNet General 模型", "detail": "Peng Zheng 等，MIT" },
     { "name": "rembg", "detail": "Daniel Gatis，MIT（模型的前處理與發佈檔）" },
     { "name": "ONNX Runtime", "detail": "Microsoft，MIT" },
-    { "name": "去色邊", "detail": "Approximate Fast Foreground Colour Estimation，Marco Forte、François Pitié" }
+    { "name": "去色邊", "detail": "依論文 Approximate Fast Foreground Colour Estimation（Marco Forte、François Pitié，ICIP 2021）的方法，以 JavaScript 獨立實作" }
   ],
   "version": "1.0.0",
   "withApp": true,

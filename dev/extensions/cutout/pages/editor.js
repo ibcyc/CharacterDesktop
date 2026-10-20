@@ -78,8 +78,9 @@
       return out;
     }
 
-    // Approximate Fast Foreground Colour Estimation ("blur fusion", Forte & Pitié 2021; radius 90, then 6): the colour
-    // a soft edge pixel would have without the background mixed in. The smooth fields are worked out on a copy at
+    // Approximate Fast Foreground Colour Estimation ("blur fusion"; M. Forte, F. Pitié, ICIP 2021,
+    // doi:10.1109/ICIP42928.2021.9506164; radius 90, then 6), written here in JavaScript from the paper's method: the
+    // colour a soft edge pixel would have without the background mixed in. The smooth fields are worked out on a copy at
     // most 2048 px large (radii scaled alike) and read back at the photo's size, where F = bF + a(I − a·bF − (1 − a)·bB).
     function foregroundFields(image, alpha, width, height) {
       const s = Math.min(1, 2048 / Math.max(width, height)), w = Math.max(1, Math.round(width * s)), h = Math.max(1, Math.round(height * s)), n = w * h;

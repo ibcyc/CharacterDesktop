@@ -1,0 +1,29 @@
+CharacterDesktop: third-party components and where their source code is
+
+CharacterDesktop itself is MIT licensed (LICENSE). The App runs on Electron, which brings
+Chromium, Node.js and FFmpeg. Their license texts ship with the App: LICENSE.electron and
+LICENSES.chromium.html. The source code that corresponds to the shipped files is here.
+
+Electron 44.7.2 (MIT)
+  https://github.com/electron/electron/tree/v44.7.2
+  CharacterDesktop.exe and the other runtime files are Electron's official Windows x64
+  build of this version, unchanged (the executable is only renamed).
+
+Chromium 152.0.7977.149 (BSD-3-Clause, with third-party parts under their own licenses,
+including LGPL parts of Blink and MPL Hunspell; see LICENSES.chromium.html)
+  https://chromium.googlesource.com/chromium/src/+/refs/tags/152.0.7977.149
+
+FFmpeg, in ffmpeg.dll (LGPL 2.1 or later), as built by Chromium 152.0.7977.149
+  Revision 2b68d2babae73714846961fb0ee47e3b3d2e39a9 of
+  https://chromium.googlesource.com/chromium/third_party/ffmpeg
+  The complete source of this revision, including Chromium's build configuration, is also
+  attached to each CharacterDesktop release on GitHub:
+  https://github.com/ibcyc/CharacterDesktop/releases
+  Electron's only FFmpeg patch (patches/ffmpeg in the Electron source above) changes how
+  macOS links it; it does not apply to this Windows build. ffmpeg.dll is a separate library
+  and can be replaced by a compatible build.
+
+Node.js v24.21.0 (MIT, with third-party parts under their own licenses)
+  https://github.com/nodejs/node/tree/v24.21.0
+
+Extensions bring their own components; each lists them in its licenses folder.

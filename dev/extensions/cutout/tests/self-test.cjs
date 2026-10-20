@@ -41,7 +41,7 @@ async function run(ctx) {
   await page(`$('app-menu-toggle').click(); $('tools-toggle').click(); true`);
   check('工具', await page(`[${shown('tools-item')}, [...$('app-menu').querySelectorAll(':scope > button, :scope > .menu-item > button')].map(b => b.textContent).slice(0, 2), [...$('tools-menu').children].map(b => b.textContent), $('download-help').textContent.includes('圖片去背')]`),
     [true, ['來源', '工具'], ['圖片去背'], false]);
-  check('credits', await page(`['圖片去背：源自留白去背工具', 'BiRefNet General 模型：Peng Zheng 等，MIT', 'rembg：Daniel Gatis，MIT', 'ONNX Runtime：Microsoft，MIT', 'Marco Forte'].map(text => $('sources-panel').textContent.includes(text))`),
+  check('credits', await page(`['圖片去背：由作者自己的留白去背工具改寫', 'BiRefNet General 模型：Peng Zheng 等，MIT', 'rembg：Daniel Gatis，MIT', 'ONNX Runtime：Microsoft，MIT', 'Marco Forte'].map(text => $('sources-panel').textContent.includes(text))`),
     [true, true, true, true, true]);
 
   // 2. The editor takes the window: the character page hides; at first only "drop a photo" and ✕.

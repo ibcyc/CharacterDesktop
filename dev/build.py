@@ -251,6 +251,7 @@ def run_extension_tests():
 def release_files():
  yield ROOT/EXE
  yield ROOT/'LICENSE'
+ yield ROOT/'THIRD-PARTY-SOURCES.txt'
  yield ROOT/ELECTRON_LICENSE
  for name in ELECTRON:yield ROOT/name
  for folder in (ROOT/'locales',APP):yield from sorted(p for p in folder.rglob('*') if p.is_file())
@@ -295,6 +296,10 @@ def write_zip(target,entries,app_only):
  print(target,'·',round(target.stat().st_size/1024/1024,1),'MB ·',len(entries),'個檔案')
 
 def make_zips():
+ # THIRD-PARTY-SOURCES.txt names the Electron version the App ships; it must be the one in package.json.
+ electron=json.loads((SOURCE/'package.json').read_text(encoding='utf-8'))['dependencies']['electron']
+ if 'Electron '+electron+' ' not in (ROOT/'THIRD-PARTY-SOURCES.txt').read_text(encoding='utf-8'):
+  sys.exit('THIRD-PARTY-SOURCES.txt 的 Electron 版本不是 '+electron+'，請一併更新 Chromium、FFmpeg 與 Node.js 的版本。')
  files=list(release_files())
  missing=[str(p) for p in files if not p.is_file()]
  if missing:sys.exit('缺少 App 檔案：'+', '.join(missing))

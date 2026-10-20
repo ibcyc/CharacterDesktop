@@ -1,0 +1,21 @@
+Cutout extension (圖片去背): third-party components and where their source code is
+
+ONNX Runtime 1.30.0 (MIT; third-party notices in onnxruntime-ThirdPartyNotices.txt)
+  https://github.com/microsoft/onnxruntime/tree/v1.30.0
+  The npm package onnxruntime-node 1.30.0 is shipped unchanged, Windows x64 files only.
+  It includes Eigen (MPL 2.0), commit 1d8b82b0740839c0de7f1242a3585e3390ff5f33:
+  https://github.com/eigen-mirror/eigen/tree/1d8b82b0740839c0de7f1242a3585e3390ff5f33
+  (the version ONNX Runtime 1.30.0 lists in cmake/deps.txt)
+
+rembg (MIT; rembg-LICENSE.txt): the model's pre- and post-processing follow it, and the
+model file is downloaded from its release.
+  https://github.com/danielgatis/rembg
+
+BiRefNet General model (MIT; BiRefNet-LICENSE.txt): not shipped. Downloaded the first time
+the tool is used, after the user agrees, from
+  https://github.com/danielgatis/rembg/releases/download/v0.0.0/BiRefNet-general-epoch_244.onnx
+  Model and code: https://github.com/ZhengPeng7/BiRefNet
+
+Clean edges (去色邊): written in JavaScript from the method of the paper
+  M. Forte, F. Pitié, "Approximate Fast Foreground Colour Estimation", ICIP 2021,
+  doi:10.1109/ICIP42928.2021.9506164
