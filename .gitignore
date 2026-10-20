@@ -3,6 +3,8 @@
 /*
 !/.gitignore
 !/LICENSE
+!/README.md
+!/README.zh-TW.md
 !/THIRD-PARTY-SOURCES.txt
 !/build.bat
 !/.gitattributes
