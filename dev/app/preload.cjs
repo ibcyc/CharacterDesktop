@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('desktopAPI',{
  setUi:change=>ipcRenderer.invoke('desktop:ui',{transparency:Number(change?.transparency),blur:change?.blur===undefined?undefined:!!change.blur}),
  windowAction:action=>ipcRenderer.invoke('desktop:window',String(action)),
  resetUi:()=>ipcRenderer.invoke('desktop:reset-ui'),
+ shortcut:create=>ipcRenderer.invoke('desktop:shortcut',create===true),
+ uninstall:options=>ipcRenderer.invoke('desktop:uninstall',{keepData:options?.keepData===true}),
  pin:(id,pinned)=>ipcRenderer.invoke('desktop:pin',String(id),pinned),
  createGroup:(name,ids)=>ipcRenderer.invoke('desktop:group-create',String(name),ids.map(String)),
  openGroup:id=>ipcRenderer.invoke('desktop:group-open',String(id)),

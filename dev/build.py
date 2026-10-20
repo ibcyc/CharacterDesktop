@@ -25,10 +25,10 @@ EXTENSIONS=DEV/'extensions';INSTALLED=ROOT/'Extensions'
 # Shared by both pages, in load order: rules, character kinds and the picture player.
 SHARED_SCRIPTS=[SHARED/'character-rules.js',SHARED/'character-kinds.js',SHARED/'image-player.js']
 # Settings page scripts, in load order; they share one script scope.
-SETTINGS_SCRIPTS=SHARED_SCRIPTS+[SETTINGS/name for name in ('preview-controls.js','preview.js','dialog.js','character-panel.js','local-kind.js','desktop-panel.js','download-panel.js','local-panel.js','tuning-panel.js','expression-menu.js','sources-panel.js','ui-panel.js','app-menu.js','groups-panel.js','tool-host.js','usage-meter.js','settings-app.js','motion.js')]
+SETTINGS_SCRIPTS=SHARED_SCRIPTS+[SETTINGS/name for name in ('preview-controls.js','preview.js','dialog.js','character-panel.js','local-kind.js','desktop-panel.js','download-panel.js','local-panel.js','tuning-panel.js','expression-menu.js','sources-panel.js','ui-panel.js','install-panel.js','app-menu.js','groups-panel.js','tool-host.js','usage-meter.js','settings-app.js','motion.js')]
 EXE='CharacterDesktop.exe'
 # Files copied as-is into resources/app; pet.html, settings.html, icon.png and package.json are generated.
-RUNTIME=['main.cjs','profiles.cjs','store.cjs','pet-window.cjs','preload.cjs','pet.js','local.cjs','pack.cjs','extensions.cjs','startup.cjs','self-test.cjs','test-helpers.cjs','fresh-self-test.cjs','preview-self-test.cjs','character-self-test.cjs']
+RUNTIME=['main.cjs','profiles.cjs','install.cjs','store.cjs','pet-window.cjs','preload.cjs','pet.js','local.cjs','pack.cjs','extensions.cjs','startup.cjs','self-test.cjs','test-helpers.cjs','fresh-self-test.cjs','preview-self-test.cjs','character-self-test.cjs']
 # Electron runtime files at the App root (electron.exe is renamed to CharacterDesktop.exe).
 # Electron's own LICENSE is kept as LICENSE.electron, beside the project's LICENSE (MIT).
 ELECTRON_LICENSE='LICENSE.electron'

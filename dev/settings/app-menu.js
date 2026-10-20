@@ -2,7 +2,7 @@
 // Bottom right: the red power button (quits the app) and, right of it, the app menu: a round button with three
 // lines that opens upward to 來源 (the sources popup), 工具 (the tools extensions bring, tool-host.js), 匯出
 // (every character into a .cdpack), 設定 (UI 設定, ui-panel.js), 重啟 (restart the app) and 還原, whose choices open to
-// its left: 所有角色設定, 完全還原 and 還原 UI 設定. Esc or a press anywhere else closes it, with its popups and its last
+// its left: 所有角色設定, 完全還原, 還原 UI 設定 and 解除安裝 (install-panel.js). Esc or a press anywhere else closes it, with its popups and its last
 // message.
 
 function setAppMenuOpen(open) {

@@ -20,6 +20,7 @@ async function startSettings() {
   setUpLocalPanel(state);
   setUpSourcesPanel(state);
   setUpUiPanel(state);
+  setUpInstall(state);
   setUpGroups();
   setUpTools();
   setUpUsageMeter();
@@ -39,6 +40,7 @@ function exposeTestHooks() {
     tool: id => tools.get(id)?.test,
     moveLayer
   };
+  window.desktopInstallTest = { offerShortcut, uninstallApp };
   window.desktopWorkflowTest = { download: downloadFromURL, downloadList, showPicked, addLocal, saveRename, changeTuning, exportPack, importPack };
 }
 

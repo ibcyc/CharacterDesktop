@@ -22,6 +22,22 @@ const extensionsRoot = argValue('--extensions-dir') ? path.resolve(argValue('--e
 const store = createStore(dataRoot);
 const local = createLocal(path.join(dataRoot, 'Local'));
 const startup = require('./startup.cjs').createStartup(app);
+// Desktop shortcut, the entry in Settings › Apps and 解除安裝 (install.cjs). The self-tests use a desktop folder of
+// their own and never touch the registry or delete a folder; what would have been done is kept in installCalls.
+const installCalls = [];
+const install = require('./install.cjs').createInstall({
+  app, shell, exe: process.execPath, root: appRoot, version: app.getVersion(),
+  ...(selfTest ? {
+    desktop: () => { const folder = path.join(path.dirname(dataRoot), 'Desktop'); fs.mkdirSync(folder, { recursive: true }); return folder; },
+    run: async (file, args) => { installCalls.push([file, ...args]); return true; },
+    removeLater: job => installCalls.push(['remove', job])
+  } : {})
+});
+let askUninstall = process.argv.includes('--uninstall');   // started from Settings › Apps: 解除安裝 is asked
+const installState = () => ({
+  supported: install.supported, shortcut: install.hasShortcut(), removable: install.removable,
+  offerShortcut: install.supported && !selfTest && !state.shortcutAsked && !install.hasShortcut()
+});
 
 app.setPath('userData', dataRoot);
 app.setPath('sessionData', path.join(dataRoot, 'Chromium'));
@@ -818,7 +834,13 @@ const fromKnownCharacter = (event, id) => fromSettings(event) && !!findEntry(id)
 const fromKnownLocal = (event, id) => fromSettings(event) && isLocal(findEntry(id));
 
 // The settings page also takes the news waiting for it (each shown once).
-ipcMain.handle('desktop:state', event => fromSettings(event) ? { ...stateForSettings(), notices: notices.splice(0) } : petFrom(event) ? stateForSettings() : null);
+ipcMain.handle('desktop:state', event => {
+  if (petFrom(event)) return stateForSettings();
+  if (!fromSettings(event)) return null;
+  const asked = askUninstall;
+  askUninstall = false;
+  return { ...stateForSettings(), notices: notices.splice(0), install: { ...installState(), askUninstall: asked } };
+});
 // Extensions: the scripts, styles and markup their parts of a page need, and the functions those parts may call.
 ipcMain.handle('desktop:extension-pages', (event, page) => {
   if ((!fromSettings(event) && !petFrom(event)) || !['settings', 'pet'].includes(page)) return [];
@@ -1053,6 +1075,23 @@ ipcMain.handle('desktop:reset-all', event => {
   reloadSettings();
   return true;
 });
+// 桌面捷徑: asked once at the first start (yes or no, it is not asked again), or made from 設定.
+ipcMain.handle('desktop:shortcut', (event, create) => {
+  if (!fromSettings(event)) return null;
+  state.shortcutAsked = true;
+  if (create === true && !install.hasShortcut()) { try { install.createShortcut(); } catch (error) { store.log(error); } }
+  persist();
+  return installState();
+});
+// 解除安裝: 開機自動啟動 off, the shortcut and the Apps entry gone, then the App closes and its folder is deleted
+// (all but Data with keepData). The self-tests never quit this way.
+ipcMain.handle('desktop:uninstall', async (event, options) => {
+  if (!fromSettings(event)) return null;
+  if (!selfTest) { try { if (startup.get().enabled) startup.set(false); } catch (error) { store.log(error); } }
+  const result = await install.uninstall({ keepData: options?.keepData === true });
+  if (!selfTest) { quitting = true; app.quit(); }
+  return result;
+});
 // The power button: the app closes (saving as always). The self-tests never quit this way.
 ipcMain.handle('desktop:quit', event => {
   if (!fromSettings(event) || selfTest) return false;
@@ -1187,6 +1226,7 @@ async function runSelfTest() {
       restack: options => stackPets(options), isDragging: id => !!pets.get(String(id))?.isDragging(),
       getTray: trayTip, clickTray: button => (button === 'right' ? showSettings() : toggleVisible()),
       getSettings: showSettings, getState: stateForSettings, stageLocal, setFileTest: value => { fileTest = value; }, report, dataRoot, extensionsRoot,
+      installCalls, shortcutFile: () => path.join(path.dirname(dataRoot), 'Desktop', 'CharacterDesktop.lnk'),
       helpers: require('./test-helpers.cjs')
     });
   } catch (error) {
@@ -1201,6 +1241,8 @@ if (!app.requestSingleInstanceLock() && !selfTest) {
 } else {
   app.on('second-instance', (_, argv) => {
     if (argv.includes('--autostart')) return;
+    // 解除安裝 from Settings › Apps while the App runs: the settings page starts again and asks.
+    if (argv.includes('--uninstall')) { askUninstall = true; showSettings(); reloadSettings(); return; }
     showSettings();
     state.visible = true;
     publish();
@@ -1217,7 +1259,9 @@ if (!app.requestSingleInstanceLock() && !selfTest) {
     session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_, callback) => callback({ cancel: true }));
     createTray();
     publish();
-    if (!selfTest && (!process.argv.includes('--autostart') || !shownLibrary().length)) showSettings();
+    if (!selfTest && (!process.argv.includes('--autostart') || !shownLibrary().length || askUninstall)) showSettings();
+    // The entry in Settings › Apps follows the App's folder and version.
+    if (!selfTest) install.register().catch(error => store.log(error));
     // Other always-on-top windows can push the characters down, so they are stacked again every two seconds.
     setInterval(() => {
       if (!state.visible) return;

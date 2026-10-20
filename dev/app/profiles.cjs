@@ -108,6 +108,8 @@ function cleanSettings(saved) {
     for (const [id, profile] of Object.entries(saved.characters)) if (isId(id)) settings.characters[id] = cleanProfile(profile);
   }
   settings.ui = cleanUi(saved.ui);
+  // The desktop shortcut is offered once (install.cjs).
+  if (saved.shortcutAsked === true) settings.shortcutAsked = true;
   settings.groups = cleanGroups(saved.groups);
   settings.active = cleanActive(saved.active, settings.groups);
   settings.layers = layerOrder(saved.layers, settings.characters, settings.groups.map(group => group.id));

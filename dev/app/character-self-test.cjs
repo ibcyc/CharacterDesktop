@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 async function run(ctx) {
-  const { app, getPet, getPets, getStack, getRaised, restack, getTray, clickTray, isDragging, getState, stageLocal, dataRoot, report } = ctx;
+  const { app, getPet, getPets, getStack, getRaised, restack, getTray, clickTray, isDragging, getState, stageLocal, dataRoot, report, installCalls, shortcutFile } = ctx;
   const { sleep, waitFor, createChecks, tracesOf, pageHelpers } = ctx.helpers;
   const { results, check } = createChecks();
   const { page, petPage, hidden, settle, choose, click, slide, switchTo, answerDialog, lastPreviewPoke, petMetrics, petReady, desktop } = pageHelpers(ctx);
@@ -467,7 +467,7 @@ async function run(ctx) {
   const ui = () => page(`[$('ui-panel').hidden, $('ui-transparency').value, $('ui-transparency-label').textContent, getComputedStyle(document.documentElement).getPropertyValue('--tint-edge'), $('ui-blur').checked, $('ui-blur-field').hidden]`);
   const buttonLook = () => page(`getComputedStyle($('sources-toggle')).backgroundColor`), lookBefore = await buttonLook();
   await page(`$('app-menu-toggle').click(); $('settings-toggle').click(); true`);
-  check('設定 choices', await page(`[[...$('settings-menu').children].map(button => button.textContent), $('settings-menu').getBoundingClientRect().right <= $('settings-toggle').getBoundingClientRect().left]`), [['UI 設定'], true]);
+  check('設定 choices', await page(`[[...$('settings-menu').children].filter(button => !button.hidden).map(button => button.textContent), $('settings-menu').getBoundingClientRect().right <= $('settings-toggle').getBoundingClientRect().left]`), [['UI 設定', '桌面捷徑'], true]);
   await page(`$('reset-toggle').click(); true`);
   check('one submenu at a time', await page(`[$('settings-menu').hidden, $('reset-menu').hidden]`), [true, false]);
   await page(`$('settings-toggle').click(); $('ui-toggle').click(); true`);
@@ -486,6 +486,30 @@ async function run(ctx) {
   await page(`$('reset-toggle').click(); $('reset-ui').click(); true`);
   await waitFor(() => Object.keys(savedFile('settings.json').ui).length === 0, 'UI settings reset');
   check('還原 UI 設定', [await ui(), getState().ui], [[true, '0', '0%', '1.000', true, !glassy], { transparency: 0, blur: true }]);
+  await page(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`);
+  // 桌面捷徑 and 解除安裝 (install.cjs). The test has a desktop folder of its own; the registry is never touched and no
+  // folder is deleted (installCalls holds what would have been done). The shortcut is offered once (never at the
+  // start of a self-test, so it is asked here); 解除安裝 asks first, and this developer's folder (with dev/) stays.
+  const { shell } = require('electron');
+  check('install at the start', await page('install'), { supported: true, shortcut: false, removable: false, offerShortcut: false, askUninstall: false });
+  await page('desktopInstallTest.offerShortcut(); true');
+  await waitFor(() => page(`!$('dialog').hidden`), 'shortcut offered');
+  check('shortcut offered', await page(`[$('dialog-message').textContent, [...$('dialog-buttons').children].map(button => button.textContent)]`), ['要在桌面建立捷徑嗎？', ['不用', '建立']]);
+  await answerDialog('yes');
+  await waitFor(() => fs.existsSync(shortcutFile()) && savedFile('settings.json').shortcutAsked === true, 'shortcut made');
+  check('desktop shortcut', [shell.readShortcutLink(shortcutFile()).target.toLowerCase(), await page(`[install.shortcut, $('shortcut-create').hidden]`)], [process.execPath.toLowerCase(), [true, true]]);
+  await page(`$('app-menu-toggle').click(); $('reset-toggle').click(); $('uninstall').click(); true`);
+  await waitFor(() => page(`!$('dialog').hidden`), 'uninstall asked');
+  check('解除安裝 asks first', await page(`[$('dialog-title').textContent, $('dialog-check').hidden, [...$('dialog-buttons').children].map(button => button.textContent + (button.classList.contains('danger') ? ' (danger)' : ''))]`),
+    ['解除安裝', true, ['取消', '解除安裝 (danger)']]);
+  await answerDialog('cancel');
+  await sleep(300);
+  check('解除安裝 cancelled', [installCalls.length, fs.existsSync(shortcutFile())], [0, true]);
+  await page(`$('uninstall').click(); true`);
+  await answerDialog('ok');
+  await waitFor(() => installCalls.length > 0 && !fs.existsSync(shortcutFile()), 'uninstalled');
+  check('解除安裝', [installCalls.map(call => call.slice(0, 2)), installCalls.some(call => call[0] === 'remove'), await page(`[install.shortcut, $('shortcut-create').hidden]`)],
+    [[['reg.exe', 'delete']], false, [false, false]]);
   await page(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`);
   // Questions are the page's own (no system message box): 取消 first, the action last.
   await page(`$('character-delete').click(); true`);
@@ -520,7 +544,7 @@ async function run(ctx) {
   check('還原 choices', await page(`(() => {
     const menu = $('reset-menu').getBoundingClientRect(), toggle = $('reset-toggle').getBoundingClientRect();
     return [$('reset-menu').hidden, [...$('reset-menu').children].filter(button => !button.hidden).map(button => button.textContent), menu.right <= toggle.left, Math.abs(menu.top - toggle.top) < 1];
-  })()`), [false, ['所有角色設定', '完全還原', '還原 UI 設定'], true, true]);
+  })()`), [false, ['所有角色設定', '完全還原', '還原 UI 設定', '解除安裝'], true, true]);
   await page(`$('reset-settings').click(); true`);
   await answerDialog('cancel');
   await sleep(400);

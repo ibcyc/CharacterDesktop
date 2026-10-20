@@ -24,6 +24,7 @@ const off = (opacity = 100) => ({ shown: false, locked: false, opacity });
   });
   assert.deepEqual(Object.keys(settings).sort(), ['active', 'characters', 'groups', 'layers', 'pinned', 'selection', 'ui', 'visible']);
   assert.deepEqual(settings.ui, {}, 'UI settings at their defaults');
+  assert.deepEqual([profiles.cleanSettings({ shortcutAsked: true }).shortcutAsked, 'shortcutAsked' in profiles.cleanSettings({ shortcutAsked: 'yes' })], [true, false], 'shortcut offered once');
   assert.deepEqual([profiles.cleanUi({ transparency: 60.4, blur: false }), profiles.cleanUi({ transparency: 150, blur: 'no' }), profiles.cleanUi({ transparency: profiles.UI_DEFAULTS.transparency, blur: true }), profiles.cleanUi({ transparency: null }), profiles.cleanUi('x')],
     [{ transparency: 60, blur: false }, { transparency: 100 }, {}, {}, {}], 'UI settings cleaned');
   assert.deepEqual(settings.pinned, [], 'nothing pinned');
