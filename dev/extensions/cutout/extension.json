@@ -1,0 +1,22 @@
+{
+  "id": "cutout",
+  "name": "圖片去背",
+  "site": "源自留白去背工具，在這台電腦上執行，照片不會上傳",
+  "credits": [
+    { "name": "BiRefNet General 模型", "detail": "Peng Zheng 等，MIT" },
+    { "name": "rembg", "detail": "Daniel Gatis，MIT（模型的前處理與發佈檔）" },
+    { "name": "ONNX Runtime", "detail": "Microsoft，MIT" },
+    { "name": "去色邊", "detail": "Approximate Fast Foreground Colour Estimation，Marco Forte、François Pitié" }
+  ],
+  "version": "1.0.0",
+  "withApp": true,
+  "api": 1,
+  "main": "main.cjs",
+  "pages": {
+    "settings": {
+      "scripts": ["pages/editor.js"],
+      "styles": ["pages/editor.css"],
+      "html": { "tool": "pages/editor.html" }
+    }
+  }
+}

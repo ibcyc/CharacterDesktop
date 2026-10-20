@@ -1,0 +1,2 @@
+# Keep files byte-for-byte so dev/build.py reproduces identical output on any clone.
+* -text

@@ -1,0 +1,38 @@
+/* 圖片去背: the editor over a checkerboard; brushes at the left, details at the right, actions at the bottom. */
+.cut{position:absolute;inset:0}
+.cut-stage{position:absolute;inset:0;background-color:#1d1f1f;background-image:conic-gradient(#2b2e2d 25%,transparent 0 50%,#2b2e2d 0 75%,transparent 0);background-size:24px 24px;overflow:hidden}
+.cut-canvas{display:block;width:100%;height:100%;cursor:crosshair;touch-action:none}
+.cut-canvas.panning{cursor:grabbing}
+.cut-drop{position:absolute;inset:0;margin:auto;width:220px;height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:1.5px dashed rgba(255,255,255,.28);border-radius:18px;color:var(--soft);font-size:13px;pointer-events:none;transition:border-color .15s,color .15s}
+.cut-drop.over,.cut-stage.over .cut-drop{border-color:var(--accent);color:var(--accent)}
+.cut-busy{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.cut-busy>*{grid-area:1/1}
+.cut-ring{width:46px;height:46px;border-radius:50%;border:3px solid rgba(255,255,255,.15);border-top-color:var(--accent);animation:cut-spin .9s linear infinite}
+#cut-percent{font-size:11px;color:var(--accent)}
+@keyframes cut-spin{to{transform:rotate(360deg)}}
+.cut-stage.shake{animation:cut-shake .32s ease-in-out}
+@keyframes cut-shake{20%{transform:translateX(-9px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(3px)}}
+.cut-tools,.cut-options{position:absolute;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px;border:1px solid var(--edge);border-radius:14px;background:rgba(0,0,0,.5);backdrop-filter:blur(14px)}
+.cut-tools{left:var(--gap)}.cut-options{right:var(--gap)}
+.cut-tools [aria-pressed=true],.cut-options [aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+.cut-size{writing-mode:vertical-lr;direction:rtl;width:22px;height:150px;margin:4px 0}
+.cut-segment{display:flex;flex-direction:column;gap:6px}.cut-segment button{padding:6px 10px;font-size:12px}
+.cut-actions{position:absolute;left:50%;bottom:var(--gap);transform:translateX(-50%);display:flex;gap:8px;align-items:center}
+.cut-actions .primary{min-width:96px}
+/* 加入's menu (a new character, or the next expression of one), above it. */
+.cut-add{position:relative}
+.cut-add-menu{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:4px;min-width:150px;max-width:260px;max-height:50vh;overflow:auto;padding:5px;border:1px solid var(--edge);border-radius:12px;background:rgba(14,18,16,.94);backdrop-filter:blur(14px);box-shadow:0 10px 28px rgba(0,0,0,.5)}
+.cut-add-menu button{font-size:12px;padding:6px 10px;text-align:left;overflow:hidden;text-overflow:ellipsis}
+.cut-add-menu button:first-child{color:var(--accent)}
+/* The queue: a thumbnail per photo, the one on show outlined; × on the one under the pointer. */
+.cut-queue{position:absolute;top:var(--gap);left:50%;transform:translateX(-50%);display:flex;gap:8px;max-width:calc(100% - 240px);overflow-x:auto;padding:4px}
+.cut-thumb{position:relative;flex:none}
+.cut-thumb>button:first-child{width:56px;height:56px;padding:0;border-radius:10px;background-color:#2b2e2d;background-size:contain;background-repeat:no-repeat;background-position:center;opacity:.6}
+.cut-thumb.current>button:first-child{border-color:var(--accent);opacity:1}
+.cut-thumb>button:first-child:hover{opacity:1}
+.cut-thumb.failed>button:first-child{border-color:rgba(194,82,74,.8)}
+.cut-thumb.waiting::after,.cut-thumb.working::after{content:"";position:absolute;inset:18px;border-radius:50%;border:2px solid rgba(255,255,255,.2);border-top-color:var(--accent);pointer-events:none}
+.cut-thumb.working::after{animation:cut-spin .9s linear infinite}
+.cut-thumb-drop,.cut-thumb-drop:not(:disabled):hover{position:absolute;top:-6px;right:-6px;width:20px;height:20px;padding:0;border-radius:50%;font-size:13px;line-height:1;display:none;place-items:center;background:rgba(0,0,0,.8)}
+.cut-thumb:hover .cut-thumb-drop{display:grid}
+.cut-message{position:absolute;left:50%;bottom:calc(var(--gap) + 52px);transform:translateX(-50%);margin:0;max-width:60%;font-size:12px;color:#f0c3a0;text-align:center;text-shadow:0 1px 3px #000}.cut-message:empty{display:none}

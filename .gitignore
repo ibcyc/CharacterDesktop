@@ -1,0 +1,10 @@
+# Only the source in dev/ is tracked. The Electron runtime, resources/app and the release zip
+# are rebuilt by dev/build.py; Data/ holds personal settings and downloaded characters.
+/*
+!/.gitignore
+!/LICENSE
+!/build.bat
+!/.gitattributes
+!/dev/
+node_modules/
+__pycache__/

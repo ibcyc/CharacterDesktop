@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "electron": "44.7.2"
+  },
+  "name": "character-desktop",
+  "productName": "角色桌面",
+  "version": "0.5.0",
+  "license": "MIT",
+  "main": "main.cjs"
+}

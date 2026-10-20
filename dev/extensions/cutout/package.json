@@ -1,0 +1,17 @@
+{
+  "name": "characterdesktop-cutout",
+  "private": true,
+  "description": "Runtime of the cutout extension (dev/build.py installs it and ships only the bundled packages, Windows x64, CPU: without the DirectML / DirectX files).",
+  "dependencies": {
+    "onnxruntime-node": "1.30.0"
+  },
+  "bundle": [
+    "onnxruntime-node",
+    "onnxruntime-common"
+  ],
+  "bundleExclude": [
+    "DirectML.dll",
+    "dxcompiler.dll",
+    "dxil.dll"
+  ]
+}

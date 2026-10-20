@@ -1,0 +1,127 @@
+/* Black glass theme for the settings window. */
+/* Surfaces (--well for controls, --pane for popups) are nearly opaque, so the controls look the same whatever the
+   transparent window shows behind them (UI 設定). */
+:root{--edge:rgba(255,255,255,.16);--well:rgba(10,11,11,.96);--pane:rgba(10,12,11,.95);--on:#4fae5c;--off:#c2524a}
+/* Controls float over the preview; each keeps a small dark glass surface so it stays readable. */
+button,select,input[type=url]{background:var(--well);border-color:var(--edge);backdrop-filter:blur(10px);transition:background .15s,border-color .15s,box-shadow .15s}
+button:not(:disabled):hover{background:rgba(255,255,255,.1);border-color:rgba(194,216,167,.5);box-shadow:0 0 0 3px rgba(194,216,167,.1)}
+.primary{background:linear-gradient(180deg,#d4e6bd,var(--accent));color:#1a2c1c;box-shadow:0 4px 14px rgba(194,216,167,.22)}
+.primary:not(:disabled):hover{background:linear-gradient(180deg,#e2f0d0,#cfe2b6)}
+select:focus-visible,input[type=url]:focus-visible,button:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(194,216,167,.25)}
+#desktop-reset,#local-open{width:100%}
+.help-note{margin-top:6px;color:var(--soft)}
+/* Expression menus (expression-menu.js): a button like the other menus, and its list over the page. */
+.menu-button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left}.menu-button span{overflow:hidden;text-overflow:ellipsis}
+.menu-button::after{content:"";flex:none;width:7px;height:7px;margin:-4px 2px 0 0;border:solid var(--soft);border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.menu-list{position:fixed;z-index:20;margin:0;padding:4px;list-style:none;overflow:auto;border:1px solid var(--edge);border-radius:9px;background:rgba(14,18,16,.94);backdrop-filter:blur(14px);box-shadow:0 10px 28px rgba(0,0,0,.5);outline:none}
+.menu-list li{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}.menu-list li>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.row>.menu{flex:1;min-width:0}
+/* The character menu's pins: shown on the pinned characters and the one under the pointer; a line after the pinned. */
+.menu-list .pin,.menu-list .pin:not(:disabled):hover{flex:none;display:grid;place-items:center;width:22px;height:22px;padding:0;border:0;background:none;box-shadow:none;backdrop-filter:none;color:var(--soft);opacity:0}
+.menu-list li:hover .pin,.menu-list li.active .pin{opacity:.7}.menu-list .pin[aria-pressed=true]{opacity:1;color:var(--accent)}
+.menu-list li.pinned+li:not(.pinned){margin-top:5px;position:relative}.menu-list li.pinned+li:not(.pinned)::before{content:"";position:absolute;left:6px;right:6px;top:-3px;border-top:1px solid var(--edge)}
+.menu-list li.active{background:rgba(194,216,167,.16)}.menu-list li[aria-selected=true]{color:var(--accent);font-weight:600}
+.icon-button{flex:none;display:grid;place-items:center;width:38px;height:38px;padding:0}
+#character-reset:not(:disabled):hover{color:var(--accent)}
+#character-delete:not(:disabled):hover{color:#ffb3a8;border-color:rgba(194,82,74,.7);box-shadow:0 0 0 3px rgba(194,82,74,.18)}
+/* A tool (tool-host.js) takes the whole window; the character page hides meanwhile. */
+.tool-host{position:fixed;inset:var(--bar) 0 0 0;contain:layout;z-index:6}
+body.tool-mode :is(.stage,.panel,.top-line,.download-dock,.visibility-dock,.app-dock,#sources-panel,#ui-panel){display:none!important}
+/* Questions (dialog.js): a glass card over the dimmed page, instead of the system's white boxes. */
+.dialog-backdrop{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:rgba(0,0,0,.45);backdrop-filter:blur(3px)}
+.dialog{width:min(420px,calc(100% - 40px));padding:18px 20px 16px;border:1px solid var(--edge);border-radius:16px;background:rgba(16,22,19,.94);backdrop-filter:blur(18px);box-shadow:0 18px 50px rgba(0,0,0,.6)}
+.dialog-title{margin:0 0 8px;font-size:11px;letter-spacing:.5px;color:var(--soft)}
+.dialog-message{margin:0;font-size:15px;font-weight:600;line-height:1.5;color:var(--text);white-space:pre-wrap}
+.dialog-detail{margin:8px 0 0;font-size:12.5px;line-height:1.6;color:var(--soft);white-space:pre-wrap}.dialog-detail:empty{display:none}
+.dialog-check{display:flex;align-items:center;gap:8px;margin:14px 0 0;font-size:12px;color:var(--soft);cursor:pointer}.dialog-check input{accent-color:var(--accent)}
+.dialog-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.dialog-buttons button{min-width:76px}
+.dialog-buttons .danger{background:linear-gradient(180deg,#e0776d,#c2524a);color:#fff;border-color:transparent}
+.dialog-buttons .danger:not(:disabled):hover{background:linear-gradient(180deg,#ea8b82,#cd6057);border-color:transparent}
+/* Small explanations under a control. */
+.hint{font-size:11px;color:var(--soft);margin:6px 0 0;text-shadow:0 1px 3px #000}.hint:empty{display:none}
+/* Switches */
+.switch-row{display:flex;align-items:center;justify-content:space-between;margin:0;font-size:12px;cursor:pointer}.switch-row span{float:none;color:var(--soft)}
+.switch{appearance:none;width:30px;height:17px;border-radius:10px;background:#363838;margin:0;position:relative;cursor:pointer;flex:none;transition:background .15s}
+.switch:before{content:"";position:absolute;width:13px;height:13px;border-radius:50%;background:#edf2e9;left:2px;top:2px;transition:transform .28s cubic-bezier(.34,1.56,.64,1),background .15s}
+.switch:checked{background:var(--accent)}.switch:checked:before{transform:translateX(13px);background:#263921}
+.switch:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.switch:disabled{opacity:.45;cursor:default}
+#startup-status{font-size:11px;color:#f0c3a0;margin:6px 0 0}#startup-status:empty{display:none}
+/* Show/hide: one large switch at the bottom centre, green when shown and red when hidden. */
+.switch.visibility{width:76px;height:38px;border-radius:19px;background:var(--off);box-shadow:0 6px 20px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.2)}
+.switch.visibility:before{width:30px;height:30px;left:4px;top:4px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.switch.visibility:checked{background:var(--on)}.switch.visibility:checked:before{transform:translateX(38px);background:#fff}
+/* Bottom centre: show/hide and lock for the character being edited. */
+.visibility-dock{display:flex;align-items:center;gap:12px}
+.lock[aria-pressed=true]{color:#1a2c1c;background:linear-gradient(180deg,#d4e6bd,var(--accent));border-color:transparent}
+/* Layers: the characters on the desktop, front first; rows are dragged to reorder. */
+#layers-label span{float:none;margin-left:6px;font-size:10px;color:var(--soft)}
+.layers{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.layer{display:flex;align-items:center;gap:8px;padding:5px 5px 5px 8px;border:1px solid var(--edge);border-radius:10px;background:var(--well);backdrop-filter:blur(10px);cursor:grab;user-select:none;transition:border-color .15s}
+.layer.current{border-color:rgba(194,216,167,.6)}
+.layer.dragging{opacity:.45}
+.layer.selected{border-color:var(--accent);background:rgba(194,216,167,.14)}
+/* A group: its line (lock, close), and its members under it when opened. */
+.layer.group{display:block;padding:0}.layer-line{display:flex;align-items:center;gap:8px;padding:5px 5px 5px 8px;cursor:pointer}
+.layer .group-icon{flex:none;color:var(--accent);display:grid}.layer .group-open{flex:none;width:12px;color:var(--soft);font-size:10px;transition:transform .15s}.layer.open .group-open{transform:rotate(90deg)}
+.layer-members{list-style:none;margin:0;padding:0 10px 7px 34px}.layer-members li{font-size:11.5px;color:var(--soft);padding:3px 0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.layer-members li.current{color:var(--accent)}
+.layer-menu{position:fixed;z-index:20;display:flex;flex-direction:column;padding:4px;border:1px solid var(--edge);border-radius:10px;background:rgba(14,18,16,.94);backdrop-filter:blur(14px);box-shadow:0 10px 28px rgba(0,0,0,.5)}.layer-menu button{font-size:12px;padding:6px 14px;border:0;background:none;text-align:left}
+/* A group being edited: its name, ✕ and a clear 保存 above the power button's row; its members' rows marked. */
+.group-edit{display:flex;align-items:center;gap:8px;padding:6px 6px 6px 12px;border:1px solid rgba(194,216,167,.5);border-radius:14px;background:var(--pane);backdrop-filter:blur(16px);box-shadow:0 10px 28px rgba(0,0,0,.45)}
+.group-edit-name{max-width:180px;font-size:12px;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.group-edit .primary{min-width:84px;font-size:14px}.group-edit .icon-button{width:34px;height:34px}
+.layer.editing{border-left:3px solid var(--accent)}
+#group-leave{font-size:12px;padding:7px 12px}#group-leave:not(:disabled):hover{color:#ffb3a8;border-color:rgba(194,82,74,.7)}
+/* 組合 (bottom right): the saved groups above their button. */
+.groups-dock{position:relative}
+.groups-panel{position:absolute;right:0;bottom:calc(100% + 8px);width:230px;max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--edge);border-radius:14px;background:var(--pane);backdrop-filter:blur(16px);box-shadow:0 12px 32px rgba(0,0,0,.5)}
+.group-item{display:flex;gap:6px;align-items:center}.group-item .group-name{flex:1;min-width:0;text-align:left;font-size:12px;overflow:hidden;text-overflow:ellipsis}
+.group-item.active .group-name{border-color:var(--accent);color:var(--accent)}.group-item .icon-button{width:32px;height:32px}
+.groups-empty{margin:2px;font-size:12px;color:var(--soft);line-height:1.6}.groups-status{margin:0 2px;font-size:11px;color:#f0c3a0}.groups-status:empty{display:none}
+.dialog-input{width:100%;margin-top:14px;padding:8px 11px;border:1px solid var(--edge);border-radius:9px;background:var(--well);color:var(--text);font:inherit;outline:none}.dialog-input:focus{border-color:var(--accent)}
+.layer .grip{color:var(--soft);font-size:12px;letter-spacing:-3px}
+.layer .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.layer .lock,.layer .close{width:28px;height:28px}
+.layer .close:not(:disabled):hover{color:#ffb3a8;border-color:rgba(194,82,74,.7);box-shadow:0 0 0 3px rgba(194,82,74,.18)}
+/* Collapsible download: a round button in the bottom-left that opens the URL bar above it. */
+.fab{display:grid;place-items:center;width:40px;height:40px;padding:0;border-radius:50%;background:linear-gradient(180deg,#d4e6bd,var(--accent));color:#1a2c1c;border-color:transparent;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.fab svg{transition:transform .25s}.fab[aria-expanded=true] svg{transform:rotate(180deg)}
+.fab:not(:disabled):hover{background:linear-gradient(180deg,#e2f0d0,#cfe2b6);border-color:transparent}
+.fab.busy{animation:fab-pulse 1.4s ease-in-out infinite}
+@keyframes fab-pulse{50%{box-shadow:0 0 0 8px rgba(194,216,167,.22),0 6px 20px rgba(0,0,0,.45)}}
+.download-panel{position:absolute;left:52px;bottom:0;width:min(560px,calc(100vw - 2*var(--gap)));padding:10px;border:1px solid var(--edge);border-radius:14px;background:var(--pane);backdrop-filter:blur(16px);box-shadow:0 12px 32px rgba(0,0,0,.5);transform-origin:0 100%}
+.download-panel[hidden]{display:none}
+#local-panel{width:max-content}#local-panel>:not(.row){width:0;min-width:100%}#local-form input[type=text]{width:0}#download-help{margin:8px 0 0}
+/* Reset all: plain small text in the bottom-right corner. */
+.app-menu .danger:not(:disabled):hover{color:#ffb3a8;border-color:rgba(194,82,74,.7);box-shadow:0 0 0 3px rgba(194,82,74,.18)}
+#app-menu-toggle[aria-expanded=true] svg{transform:rotate(90deg)}
+.fab.power{background:linear-gradient(180deg,#e0776d,#c2524a);color:#fff}.fab.power:not(:disabled):hover{background:linear-gradient(180deg,#ea8b82,#cd6057);border-color:transparent}
+/* Local characters: the picture in the preview, text fields, the file-name help, renaming. */
+.local-image{position:absolute;pointer-events:none;transform-origin:50% 100%;max-width:none;-webkit-user-drag:none}
+input[type=text]{font:inherit;border:1px solid var(--edge);border-radius:9px;color:var(--text);background:var(--well);padding:8px 11px;backdrop-filter:blur(10px)}
+input[type=text]:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(194,216,167,.25)}
+.row>input[type=text]{flex:1;min-width:0}
+.local-help{font-size:12px;line-height:1.7;color:var(--soft);margin:10px 0 0;padding:8px 10px;border-radius:9px;background:rgba(255,255,255,.05)}
+.local-help b{color:var(--text)}
+#local-form{margin-top:10px}#local-form .hint{margin:0 0 6px;white-space:pre-wrap}
+#local-status{font-size:12px;color:var(--accent);margin-top:8px;white-space:pre-wrap}#local-status:empty{display:none}
+.rename-row{margin-top:8px}
+/* Sources: the popup above the 來源 button. */
+.sources-panel{position:fixed;z-index:4;right:calc(var(--gap) + 84px);bottom:calc(var(--gap) + 48px);width:300px;padding:12px 14px;border:1px solid var(--edge);border-radius:14px;background:var(--pane);backdrop-filter:blur(16px);box-shadow:0 12px 32px rgba(0,0,0,.5);font-size:12px}
+.sources-panel h3{margin:0 0 4px;font-size:12px;color:var(--accent);letter-spacing:.5px}.sources-panel h3+ul{margin:0 0 10px}
+.sources-panel ul{padding-left:16px;color:var(--soft)}.sources-panel li{margin:2px 0}.sources-panel li b{color:var(--text);font-weight:600}
+.sources-panel ul:last-child{margin-bottom:0}.sources-panel li ul{margin:2px 0 4px;padding-left:14px}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:8px}::-webkit-scrollbar-track{background:transparent}.panel::-webkit-scrollbar{width:0}
+
+/* The window is transparent: what is behind it (blurred when 模糊 is on) shows through a dark tint, which UI 設定 ›
+   背景透明度 sets (ui-panel.js). Only the background changes; the controls keep their own dark surfaces. */
+html,body{background:transparent}
+body{background:radial-gradient(ellipse at 50% 45%,rgba(30,32,32,var(--tint-center,1)),rgba(0,0,0,var(--tint-edge,1)) 75%)}
+.stage{background:transparent;box-shadow:inset 0 0 200px rgba(0,0,0,var(--vignette,.764))}
+body::after{content:"";position:fixed;inset:0;z-index:60;border:1px solid rgba(255,255,255,.08);pointer-events:none}
+.ui-panel{width:240px}.ui-panel .field{margin:0}.ui-panel .field+.field{margin-top:12px}
+/* The window's own title bar: drag it to move the window (double-click: 最大化); 最小化, 最大化 and 關閉 on the right.
+   The side panels start just under it. */
+:root{--bar:32px}
+.title-bar{position:fixed;z-index:7;top:0;left:0;right:0;height:var(--bar);display:flex;justify-content:flex-end;-webkit-app-region:drag}
+.window-button{-webkit-app-region:no-drag;width:46px;height:100%;padding:0;display:grid;place-items:center;border:0;border-radius:0;background:transparent;backdrop-filter:none;color:var(--soft)}
+.window-button:not(:disabled):hover{background:rgba(255,255,255,.1);box-shadow:none;color:var(--text)}.window-button.close:not(:disabled):hover{background:#c42b1c;color:#fff}
+.panel-left,.panel-right{top:calc(var(--bar) + 6px)}.panel{max-height:calc(100% - var(--gap) - 96px - var(--bar))}
