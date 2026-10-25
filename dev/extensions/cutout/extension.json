@@ -14,7 +14,7 @@
   "main": "main.cjs",
   "pages": {
     "settings": {
-      "scripts": ["pages/editor.js"],
+      "scripts": ["pages/apng.js", "pages/editor.js"],
       "styles": ["pages/editor.css"],
       "html": { "tool": "pages/editor.html" }
     }

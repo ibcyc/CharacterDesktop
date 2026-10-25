@@ -5,6 +5,9 @@
 //     "main": "main.cjs",                                     main-process part, see below
 //     "pages": { "settings": { "scripts": [...], "styles": [...], "html": { "<slot>": "file.html" } },
 //                "pet": { "scripts": [...] } } }
+// Its text is written in Traditional Chinese like the app's; strings/<language>.json (for example strings/en.json)
+// translates it for the pages, as shared/i18n.js describes ('context|' keys apply inside its own
+// data-i18n-context element).
 // main.cjs exports activate(context) -> part, where
 //   context = { id, appVersion, dataFolder, charactersFolder, offline, library(), update(entry), remove(id), log(error) }
 // (offline: the self-tests run; the extension must not use the network; library(): its own characters only, as is
@@ -49,11 +52,19 @@ function loadExtension(folder, context) {
       html: Object.fromEntries(Object.entries(spec.html || {}).map(([slot, name]) => [slot, read(name)]))
     };
   }
+  const strings = {};
+  const stringsFolder = path.join(folder, 'strings');
+  for (const name of fs.existsSync(stringsFolder) ? fs.readdirSync(stringsFolder) : []) {
+    const match = /^([a-z]{2,3}(?:-[A-Za-z]{2,4})?)\.json$/.exec(name);
+    if (!match) continue;
+    const table = JSON.parse(read(path.join('strings', name)));
+    strings[match[1]] = Object.fromEntries(Object.entries(table && typeof table === 'object' ? table : {}).filter(([, value]) => typeof value === 'string'));
+  }
   const part = require(fileIn(folder, manifest.main || 'main.cjs')).activate({ ...context(manifest.id) }) || {};
   return {
     id: manifest.id, name: String(manifest.name || manifest.id), site: String(manifest.site || ''), author: String(manifest.author || ''),
     credits: (Array.isArray(manifest.credits) ? manifest.credits : []).map(credit => ({ name: String(credit?.name || ''), detail: String(credit?.detail || '') })).filter(credit => credit.name),
-    folder, pages, ...part
+    folder, pages, strings, ...part
   };
 }
 

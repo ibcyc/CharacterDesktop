@@ -1,7 +1,7 @@
 // Character profiles and saved settings. Pure functions: no Electron, no files.
 //
 // Every character (pet) keeps its own profile:
-//   { expression, heights: { [look key]: px }, desktop: { shown, locked, opacity: 1-100, x, y }, mirror,
+//   { expression, heights: { [look key]: px }, interaction: { [look key]: {…} }, desktop: { shown, locked, opacity: 1-100, x, y }, mirror,
 //     tuning: { breath, rate, bounce, pokeFace, fifthFace },          (characters that are pictures)
 //     look: {…}, options: {…} }                                       (characters of an extension, checked by it)
 // `look` is what an extension's character shows (a costume, …) and `options` are its own settings; the app keeps
@@ -72,6 +72,65 @@ function cleanTuning(value) {
 function tuningFor(profiles, id) { return cleanTuning(profiles[String(id)]?.tuning); }
 function mirrorFor(profiles, id) { return profiles[String(id)]?.mirror === true; }
 
+// Interaction, kept per look like the heights (interaction: { [look key]: … }), each part with its switch; a part
+// switched off keeps what was set, for when it is on again:
+//   follow: { on, strength 1–100 }       滑鼠跟隨: how strongly the character leans toward the cursor
+//   sounds: { on, poke, fifth }          互動音效: file names in the sound library ('' for none), for a poke and for
+//                                        every fifth poke
+//   autoFace: { on, seconds 5–300 }      自動換表情: another expression every so often
+//   lines: { on, auto, poke, fifth, seconds, place }   台詞: short lines said at random, with each 自動換表情 (or on
+//                                        their own every `seconds`), on a poke and on every fifth poke; place: where
+//                                        the bubble's tail points, in the character's window ({ x 0–1, y PLACE_TOP–1 }
+//                                        of its width and height; above it when negative), null: above the
+//                                        character's top
+const FOLLOW_DEFAULT = 50, AUTO_SECONDS_DEFAULT = 30, LINE_LENGTH = 60, LINE_COUNT = 30;
+const SOUND_FILE = /^[^\\/:*?"<>|]{1,120}\.(mp3|wav|ogg|m4a|flac)$/i;
+const soundName = value => typeof value === 'string' && SOUND_FILE.test(value) && !value.startsWith('.') ? value : '';
+function cleanFollow(value) {
+  const strength = Math.round(Number(value));
+  return Number.isFinite(strength) && strength >= 1 ? Math.min(100, strength) : 0;
+}
+function cleanSeconds(value, fallback) {
+  const seconds = Math.round(Number(value));
+  return Number.isFinite(seconds) && seconds >= 1 ? Math.min(300, Math.max(5, seconds)) : fallback;
+}
+const PLACE_TOP = -0.35;
+const fraction = (value, low) => Math.round(Math.min(1, Math.max(low, value)) * 1000) / 1000;
+const cleanPlace = place => place && Number.isFinite(place.x) && Number.isFinite(place.y) ? { x: fraction(place.x, 0), y: fraction(place.y, PLACE_TOP) } : null;
+const cleanLineList = list => (Array.isArray(list) ? list : []).filter(line => typeof line === 'string')
+  .map(line => line.replace(/\s+/g, ' ').trim().slice(0, LINE_LENGTH)).filter(Boolean).slice(0, LINE_COUNT);
+// One look's interaction, every part filled in (a missing one: off, at its defaults).
+function cleanInteraction(value) {
+  const part = name => value?.[name] && typeof value[name] === 'object' ? value[name] : {};
+  const follow = part('follow'), sounds = part('sounds'), autoFace = part('autoFace'), lines = part('lines');
+  return {
+    follow: { on: follow.on === true, strength: cleanFollow(follow.strength) || FOLLOW_DEFAULT },
+    sounds: { on: sounds.on === true, poke: soundName(sounds.poke), fifth: soundName(sounds.fifth) },
+    autoFace: { on: autoFace.on === true, seconds: cleanSeconds(autoFace.seconds, AUTO_SECONDS_DEFAULT) },
+    lines: { on: lines.on === true, auto: cleanLineList(lines.auto), poke: cleanLineList(lines.poke), fifth: cleanLineList(lines.fifth), seconds: cleanSeconds(lines.seconds, AUTO_SECONDS_DEFAULT), place: cleanPlace(lines.place) }
+  };
+}
+const isDefaultInteraction = value => JSON.stringify(cleanInteraction(value)) === JSON.stringify(cleanInteraction());
+function cleanInteractions(profile) {
+  const looks = {};
+  for (const [key, value] of Object.entries(profile?.interaction && typeof profile.interaction === 'object' ? profile.interaction : {})) {
+    if (/^[\w-]{1,40}$/.test(key) && !isDefaultInteraction(value)) looks[key] = cleanInteraction(value);
+  }
+  // Kept for the whole character before looks had their own (never released, 2026-10-23): the first look takes it.
+  if (!looks['0'] && (profile?.follow || profile?.sounds || profile?.autoFace || profile?.lines)) {
+    const before = cleanInteraction({
+      follow: { on: !!cleanFollow(profile.follow), strength: profile.follow }, sounds: { on: !!profile.sounds, ...profile.sounds },
+      autoFace: { on: !!cleanSeconds(profile.autoFace, 0), seconds: profile.autoFace }, lines: profile.lines
+    });
+    if (!isDefaultInteraction(before)) looks['0'] = before;
+  }
+  return Object.keys(looks).length ? looks : null;
+}
+function interactionFor(profiles, id, key) { return cleanInteraction(profiles[String(id)]?.interaction?.[key]); }
+// The volume of every sound, 0–100.
+const VOLUME_DEFAULT = 70;
+const cleanVolume = value => Number.isFinite(Number(value)) ? Math.min(100, Math.max(0, Math.round(Number(value)))) : VOLUME_DEFAULT;
+
 function cleanProfile(profile) {
   const clean = {};
   const look = plainData(profile?.look), options = plainData(profile?.options);
@@ -88,6 +147,8 @@ function cleanProfile(profile) {
   if (profile?.mirror === true) clean.mirror = true;
   if (profile?.tuning && typeof profile.tuning === 'object') clean.tuning = cleanTuning(profile.tuning);
   if (options) clean.options = options;
+  const interaction = cleanInteractions(profile);
+  if (interaction) clean.interaction = interaction;
   return clean;
 }
 
@@ -108,8 +169,11 @@ function cleanSettings(saved) {
     for (const [id, profile] of Object.entries(saved.characters)) if (isId(id)) settings.characters[id] = cleanProfile(profile);
   }
   settings.ui = cleanUi(saved.ui);
+  if (saved.volume !== undefined && cleanVolume(saved.volume) !== VOLUME_DEFAULT) settings.volume = cleanVolume(saved.volume);
   // The desktop shortcut is offered once (install.cjs).
   if (saved.shortcutAsked === true) settings.shortcutAsked = true;
+  // The UI language, chosen at the first start or in 設定 › 語言 (the app checks it is one it has, shared/i18n.js).
+  if (typeof saved.language === 'string' && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(saved.language)) settings.language = saved.language;
   settings.groups = cleanGroups(saved.groups);
   settings.active = cleanActive(saved.active, settings.groups);
   settings.layers = layerOrder(saved.layers, settings.characters, settings.groups.map(group => group.id));
@@ -175,5 +239,5 @@ function keepProfilesFor(profiles, library) {
 module.exports = {
   DEFAULT_HEIGHT, MIN_HEIGHT, MAX_HEIGHT, TUNING_DEFAULTS, TUNING_LIMITS, AUTO_POKE_DEFAULT, AUTO_POKE_MAX, cleanAutoPoke, autoPokeOf,
   isId, expressionId, clampHeight, clampOpacity, plainData, cleanProfile, cleanDesktop, cleanTuning, tuningFor, mirrorFor,
-  UI_DEFAULTS, cleanUi, cleanSettings, cleanGroups, cleanActive, selectionFor, heightFor, desktopFor, layerOrder, shownLayers, keepProfilesFor
+  UI_DEFAULTS, cleanUi, FOLLOW_DEFAULT, AUTO_SECONDS_DEFAULT, LINE_LENGTH, LINE_COUNT, PLACE_TOP, soundName, cleanInteraction, isDefaultInteraction, interactionFor, VOLUME_DEFAULT, cleanVolume, cleanSettings, cleanGroups, cleanActive, selectionFor, heightFor, desktopFor, layerOrder, shownLayers, keepProfilesFor
 };

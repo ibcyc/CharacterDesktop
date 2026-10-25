@@ -10,9 +10,16 @@
 // redo strokes. A photo added leaves the queue; with none left the editor closes.
 // The heavy pixel work (decoding, scaling, the cutout and its edges) runs in a background worker, so the page stays
 // smooth however many photos are dropped; a photo is only decoded in full when its turn comes.
+// An animation (GIF, animated WebP or APNG) asks first: 逐格去背 cuts out every frame like a photo (with progress;
+// at most MAX_FRAMES) and it plays in the editor without brushes, then is added or downloaded as an animated PNG
+// (apng.js) with soft edges; 只用第一格 treats it as a photo.
 (() => {
   const ID = 'cutout';
-  const TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+  const TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  const ANIMATED = ['image/gif', 'image/webp', 'image/png'];   // formats that can hold an animation
+  const MAX_FRAMES = 100;
+  const MAX_FRAME_PIXELS = 30e6;            // all frames of an animation together, as decoded
+  const PICTURE_BYTES = 19 * 1024 * 1024;   // an animation added to a character stays under the app's 20 MB
   const MAX_QUEUE = 30;
   const HISTORY_BYTES = 64 * 1024 * 1024;   // undo steps kept per photo, at most
   const ADD_MAX_SIDE = 2048;                // a picture added to a character is at most this large
@@ -43,16 +50,94 @@
       return { thumb: await canvas.convertToBlob({ type: 'image/png' }) };
     }
 
-    // The photo decoded, and as rembg gives it to the model: 1024×1024, scaled by its brightest value, normalized.
-    async function prepare({ id, file }) {
-      const image = await createImageBitmap(file, { imageOrientation: 'from-image' });
-      photos.set(id, { image, alpha: null });
+    // A picture as rembg gives it to the model: 1024×1024, scaled by its brightest value, normalized.
+    function inputOf(image) {
       const pixels = pixelsOf(image, SIZE, SIZE), plane = SIZE * SIZE, input = new Float32Array(3 * plane);
       let max = 0;
       for (let i = 0; i < pixels.length; i += 4) max = Math.max(max, pixels[i], pixels[i + 1], pixels[i + 2]);
       const scale = 1 / Math.max(max, 1e-6);
       for (let i = 0; i < plane; i++) for (let c = 0; c < 3; c++) input[c * plane + i] = (pixels[i * 4 + c] * scale - MEAN[c]) / STD[c];
-      return { width: image.width, height: image.height, input, image: await createImageBitmap(image) };
+      return input;
+    }
+    // The photo decoded, and its input for the model.
+    async function prepare({ id, file }) {
+      const image = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      photos.set(id, { image, alpha: null });
+      return { width: image.width, height: image.height, input: inputOf(image), image: await createImageBitmap(image) };
+    }
+
+    // ---------- Animations ----------
+    // How many frames a picture has (1 for a still one), read in full so a GIF's count is final.
+    async function frames({ file }) {
+      if (typeof ImageDecoder === 'undefined' || !await ImageDecoder.isTypeSupported(file.type)) return { count: 1 };
+      const decoder = new ImageDecoder({ data: await file.arrayBuffer(), type: file.type });
+      try {
+        await decoder.tracks.ready;
+        await decoder.completed;
+        return { count: decoder.tracks.selectedTrack?.frameCount || 1 };
+      } catch {
+        return { count: 1 };
+      } finally {
+        decoder.close();
+      }
+    }
+    // Every frame (up to limit) decoded whole, as it shows, scaled down together if very large; their delays in ms.
+    async function prepareFrames({ id, file, limit, maxPixels }) {
+      const decoder = new ImageDecoder({ data: await file.arrayBuffer(), type: file.type });
+      try {
+        await decoder.tracks.ready;
+        await decoder.completed;
+        const count = Math.min(limit, decoder.tracks.selectedTrack.frameCount), list = [], delays = [];
+        for (let index = 0; index < count; index++) {
+          const { image } = await decoder.decode({ frameIndex: index });
+          const scale = Math.min(1, Math.sqrt(maxPixels / (count * image.displayWidth * image.displayHeight)));
+          list.push(await createImageBitmap(image, { resizeWidth: Math.max(1, Math.round(image.displayWidth * scale)), resizeHeight: Math.max(1, Math.round(image.displayHeight * scale)), resizeQuality: 'high' }));
+          delays.push((image.duration ?? 100000) / 1000);
+          image.close();
+        }
+        photos.set(id, { image: list[0], frames: list, alphas: [], alpha: null });
+        return { width: list[0].width, height: list[0].height, count, delays, sources: await Promise.all(list.map(frame => createImageBitmap(frame))) };
+      } finally {
+        decoder.close();
+      }
+    }
+    const frameInput = ({ id, index }) => ({ input: inputOf(photos.get(id).frames[index]) });
+    // The cut-out frames as one animated PNG: trimmed to what shows in any frame (with trim), at most maxSide, and
+    // smaller again until it is under maxBytes.
+    async function encode({ frames: list, delays, trim, maxSide, maxBytes }) {
+      const width = list[0].width, height = list[0].height, alphaOf = frame => pixelsOf(frame, width, height);
+      let box = { x: 0, y: 0, width, height };
+      if (trim) {
+        let left = width, top = height, right = -1, bottom = -1;
+        for (const frame of list) {
+          const data = alphaOf(frame);
+          for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+            if (data[(y * width + x) * 4 + 3] <= 8) continue;
+            if (x < left) left = x; if (x > right) right = x; if (y < top) top = y; if (y > bottom) bottom = y;
+          }
+        }
+        if (right >= 0) {
+          left = Math.max(0, left - 2); top = Math.max(0, top - 2);
+          box = { x: left, y: top, width: Math.min(width, right + 3) - left, height: Math.min(height, bottom + 3) - top };
+        }
+      }
+      let side = Math.min(maxSide, Math.max(box.width, box.height));
+      for (;;) {
+        const scale = side / Math.max(box.width, box.height), w = Math.max(1, Math.round(box.width * scale)), h = Math.max(1, Math.round(box.height * scale));
+        const rgba = list.map(frame => {
+          const ctx = context(new OffscreenCanvas(w, h));
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(frame, box.x, box.y, box.width, box.height, 0, 0, w, h);
+          return ctx.getImageData(0, 0, w, h).data;
+        });
+        const data = await cutoutWriteAPNG(rgba, w, h, delays);
+        if (data.length <= maxBytes || side <= 128) {
+          for (const frame of list) frame.close();
+          if (data.length > maxBytes) throw new Error('動圖太大，請換一個格數或尺寸小一點的。');
+          return { data };
+        }
+        side = Math.floor(side * 0.75);
+      }
     }
 
     // r×r mean, edges repeated (as cv2.blur), in two passes.
@@ -122,19 +207,20 @@
 
     // The cutout: with a mask (1024×1024 bytes from the model) it becomes the photo's alpha, smoothly up to its size
     // and times its own alpha; then the colours, by the chosen edges.
-    function compose({ id, mask, edges }) {
-      const photo = photos.get(id), { image } = photo, width = image.width, height = image.height;
+    // With index, one frame of an animation.
+    function compose({ id, index, mask, edges }) {
+      const photo = photos.get(id), image = index === undefined ? photo.image : photo.frames[index], width = image.width, height = image.height;
       const pixels = pixelsOf(image, width, height);
       if (mask) {
         const small = new ImageData(SIZE, SIZE);
         for (let i = 0; i < mask.length; i++) { small.data[i * 4] = mask[i]; small.data[i * 4 + 3] = 255; }
         const canvas = new OffscreenCanvas(SIZE, SIZE);
         canvas.getContext('2d').putImageData(small, 0, 0);
-        const scaled = pixelsOf(canvas, width, height);
-        photo.alpha = new Uint8ClampedArray(width * height);
-        for (let i = 0; i < photo.alpha.length; i++) photo.alpha[i] = Math.round(scaled[i * 4] * pixels[i * 4 + 3] / 255);
+        const scaled = pixelsOf(canvas, width, height), made = new Uint8ClampedArray(width * height);
+        for (let i = 0; i < made.length; i++) made[i] = Math.round(scaled[i * 4] * pixels[i * 4 + 3] / 255);
+        if (index === undefined) photo.alpha = made; else photo.alphas[index] = made;
       }
-      const alpha = photo.alpha, out = new ImageData(width, height), data = out.data;
+      const alpha = index === undefined ? photo.alpha : photo.alphas[index], out = new ImageData(width, height), data = out.data;
       const fields = edges === 'clean' ? foregroundFields(image, alpha, width, height) : null;
       for (let i = 0; i < alpha.length; i++) {
         const a = alpha[i], at = i * 4;
@@ -155,16 +241,18 @@
     }
 
     function drop({ id }) {
-      photos.get(id)?.image.close();
+      const photo = photos.get(id);
+      for (const image of photo?.frames || [photo?.image]) image?.close();
       photos.delete(id);
       return {};
     }
 
-    const handlers = { thumb, prepare, compose, drop };
+    const handlers = { thumb, prepare, compose, drop, frames, prepareFrames, frameInput, encode };
+    const movable = item => item instanceof ImageBitmap ? [item] : ArrayBuffer.isView(item) ? [item.buffer] : Array.isArray(item) ? item.flatMap(movable) : [];
     self.onmessage = async ({ data }) => {
       try {
         const value = await handlers[data.type](data);
-        self.postMessage({ task: data.task, value }, Object.values(value).flatMap(item => item instanceof ImageBitmap ? [item] : ArrayBuffer.isView(item) ? [item.buffer] : []));
+        self.postMessage({ task: data.task, value }, Object.values(value).flatMap(movable));
       } catch (error) {
         self.postMessage({ task: data.task, error: String(error.message || error) });
       }
@@ -175,7 +263,8 @@
   const waiting = new Map();
   // One request to the worker; resolves with its answer.
   function ask(type, payload = {}) {
-    worker ??= Object.assign(new Worker(URL.createObjectURL(new Blob(['(' + cutoutWorker + ')()'], { type: 'text/javascript' }))), {
+    // The worker gets the APNG writer (apng.js) too.
+    worker ??= Object.assign(new Worker(URL.createObjectURL(new Blob([String(cutoutWriteAPNG), '\n(' + cutoutWorker + ')()'], { type: 'text/javascript' }))), {
       onmessage: ({ data }) => {
         const pending = waiting.get(data.task);
         waiting.delete(data.task);
@@ -185,13 +274,14 @@
     const task = ++tasks;
     return new Promise((resolve, reject) => {
       waiting.set(task, { resolve, reject });
-      worker.postMessage({ ...payload, type, task }, ArrayBuffer.isView(payload.mask) ? [payload.mask.buffer] : []);
+      worker.postMessage({ ...payload, type, task }, [...(ArrayBuffer.isView(payload.mask) ? [payload.mask.buffer] : []), ...(payload.frames || [])]);
     });
   }
 
   // ---------- The queue ----------
   // { id, name, file, thumb (URL), status: 'waiting' | 'working' | 'ready' | 'failed', and once decoded: width, height,
-  // image (ImageBitmap); once cut out: result (canvas being edited), undo, redo, edges }.
+  // image (ImageBitmap); once cut out: result (canvas being edited), undo, redo, edges }. An animation also has
+  // frames (how many to cut out), and once decoded: sources and delays; once cut out: results (one per frame).
   let items = [], current = null, processing = false, ids = 0;
   let photo = null;    // the photo on show once it is cut out (current, when ready)
   let view = { scale: 1, x: 0, y: 0 }, controls = null, queued = false, adding = false;
@@ -236,9 +326,15 @@
     const at = place();
     ctx.imageSmoothingEnabled = at.pixel < 2;
     ctx.imageSmoothingQuality = 'high';
-    // A photo still being cut out shows faintly behind the ring.
+    // A photo still being cut out shows faintly behind the ring; an animation plays (its frames, by their delays).
     ctx.globalAlpha = photo ? 1 : 0.35;
-    ctx.drawImage(photo && !comparing ? photo.result : current.image, at.left, at.top, at.width, at.height);
+    if (photo?.results) {
+      const frame = frameAt(photo, performance.now());
+      ctx.drawImage(comparing ? photo.sources[frame] : photo.results[frame], at.left, at.top, at.width, at.height);
+      requestDraw();
+    } else {
+      ctx.drawImage(photo && !comparing ? photo.result : current.image, at.left, at.top, at.width, at.height);
+    }
     ctx.globalAlpha = 1;
     // The brush's outline under the pointer.
     if (pointer && photo && !comparing) {
@@ -252,6 +348,13 @@
       }
     }
   }
+  // The frame of an animation showing at a time (ms).
+  function frameAt(item, time) {
+    const delays = item.delays.slice(0, item.results.length).map(delay => delay >= 20 ? delay : 100), total = delays.reduce((sum, delay) => sum + delay, 0);
+    let left = time % total, frame = 0;
+    while (left >= delays[frame] && frame < delays.length - 1) left -= delays[frame++];
+    return frame;
+  }
   function requestDraw() {
     if (queued) return;
     queued = true;
@@ -263,7 +366,8 @@
     const ready = !!photo && !adding;
     $('cut-drop').hidden = items.length > 0;
     $('cut-busy').hidden = !current || current.status === 'ready' || current.status === 'failed';
-    $('cut-tools').hidden = $('cut-options').hidden = !photo;
+    $('cut-tools').hidden = !photo || !!photo.results;
+    $('cut-options').hidden = !photo;
     for (const id of ['cut-add', 'cut-save', 'cut-erase', 'cut-restore', 'cut-clean', 'cut-natural', 'cut-trim', 'cut-compare']) $(id).disabled = !ready;
     for (const [id, on] of [['cut-erase', brush === 'erase'], ['cut-restore', brush === 'restore'], ['cut-clean', edges === 'clean'], ['cut-natural', edges === 'natural'], ['cut-trim', trim], ['cut-compare', comparing]]) {
       $(id).setAttribute('aria-pressed', String(on));
@@ -318,6 +422,7 @@
   function forget(item) {
     if (item.status !== 'waiting') ask('drop', { id: item.id });
     item.image?.close();
+    for (const frame of [...(item.sources || []), ...(item.results || [])]) frame.close();
     URL.revokeObjectURL(item.thumb);
   }
   function removeItem(item) {
@@ -357,8 +462,10 @@
     for (const file of files.filter(item => TYPES.includes(item?.type))) {
       if (items.length + added.length >= MAX_QUEUE) { shake(); break; }
       try {
+        const frames = ANIMATED.includes(file.type) ? await animationFrames(file) : 1;
+        if (!frames) continue;
         const { thumb } = await ask('thumb', { file });
-        added.push({ id: ++ids, name: file.name.replace(/\.[^.]+$/, '') || '去背', file, status: 'waiting', thumb: URL.createObjectURL(thumb) });
+        added.push({ id: ++ids, name: file.name.replace(/\.[^.]+$/, '') || '去背', file, status: 'waiting', thumb: URL.createObjectURL(thumb), ...(frames > 1 ? { frames } : {}) });
       } catch {
         shake();
       }
@@ -370,8 +477,38 @@
     return true;
   }
 
+  // An animation asks first: how many frames to cut out (0: leave it out; 1: as a photo).
+  async function animationFrames(file) {
+    const { count } = await ask('frames', { file });
+    if (count < 2) return 1;
+    const answer = await CharacterDesktop.ask({
+      message: '這是動圖（共 ' + count + ' 格）', detail: (count > MAX_FRAMES ? '只會處理前 ' + MAX_FRAMES + ' 格。' : '') + '每一格都要去背，需要一點時間。',
+      buttons: [{ label: '取消', value: 'cancel' }, { label: '只用第一格', value: 'first' }, { label: '逐格去背', value: 'all', kind: 'primary' }]
+    });
+    return answer === 'all' ? Math.min(count, MAX_FRAMES) : answer === 'first' ? 1 : 0;
+  }
+
+  // An animation: every frame through the model and cut out, one after another; the ring counts them.
+  async function cutOutFrames(item) {
+    const prepared = await ask('prepareFrames', { id: item.id, file: item.file, limit: item.frames, maxPixels: MAX_FRAME_PIXELS });
+    Object.assign(item, { width: prepared.width, height: prepared.height, image: prepared.sources[0], sources: prepared.sources, delays: prepared.delays });
+    if (item === current) { controls?.reset(); sync(); }
+    const results = [];
+    try {
+      for (let index = 0; index < prepared.count && items.includes(item); index++) {
+        if (item === current) $('cut-percent').textContent = (index + 1) + ' / ' + prepared.count;
+        const mask = await call('remove', (await ask('frameInput', { id: item.id, index })).input);
+        results.push((await ask('compose', { id: item.id, index, mask, edges })).result);
+      }
+    } finally {
+      $('cut-percent').textContent = '';
+    }
+    Object.assign(item, { results, result: null, undo: [], redo: [], edges });
+  }
+
   // One photo at a time: decoded in the worker, through the model, cut out in the worker.
   async function cutOut(item) {
+    if (item.frames) return cutOutFrames(item);
     const prepared = await ask('prepare', { id: item.id, file: item.file });
     Object.assign(item, { width: prepared.width, height: prepared.height, image: prepared.image });
     if (item === current) { controls?.reset(); sync(); }
@@ -418,7 +555,14 @@
     if (item === current) photo = null;
     sync();
     try {
-      setResult(item, (await ask('compose', { id: item.id, edges })).result);
+      if (item.results) {
+        const results = [];
+        for (let index = 0; index < item.results.length; index++) results.push((await ask('compose', { id: item.id, index, edges })).result);
+        for (const frame of item.results) frame.close();
+        Object.assign(item, { results, edges });
+      } else {
+        setResult(item, (await ask('compose', { id: item.id, edges })).result);
+      }
       item.status = 'ready';
     } catch (error) {
       Object.assign(item, { status: 'failed', failure: String(error.message || error) });
@@ -472,7 +616,7 @@
     stroke.last = to;
   }
   function startStroke(event) {
-    if (event.button !== 0 || !photo || adding || comparing) return;
+    if (event.button !== 0 || !photo || photo.results || adding || comparing) return;
     const before = newCanvas(photo.result.width, photo.result.height);
     before.getContext('2d').drawImage(photo.result, 0, 0);
     const point = toPhoto(event.clientX, event.clientY);
@@ -528,6 +672,13 @@
     return out;
   }
   const pngOf = canvas => new Promise(resolve => canvas.toBlob(resolve, 'image/png')).then(blob => blob.arrayBuffer()).then(buffer => new Uint8Array(buffer));
+  // What is added or downloaded: a PNG, or for an animation an animated PNG (made in the worker from copies of its
+  // frames). maxSide applies to characters.
+  async function pictureOf(item, maxSide = Infinity) {
+    if (!item.results) return pngOf(output(item, maxSide));
+    const frames = await Promise.all(item.results.map(frame => createImageBitmap(frame)));
+    return (await ask('encode', { frames, delays: item.delays.slice(0, frames.length), trim, maxSide, maxBytes: maxSide === Infinity ? Infinity : PICTURE_BYTES })).data;
+  }
 
   // ---------- 加入, 下載, ✕ ----------
   // 加入: with local characters, a menu: a new character, or the next expression of one of them.
@@ -553,7 +704,9 @@
     adding = true;
     sync();
     try {
-      const answer = await CharacterDesktop.addPicture(item.name, await pngOf(output(item, ADD_MAX_SIDE)), characterId || '');
+      let data;
+      try { data = await pictureOf(item, ADD_MAX_SIDE); } catch (error) { message(String(error.message || error)); return null; }
+      const answer = await CharacterDesktop.addPicture(item.name, data, characterId || '');
       if (!answer?.ok) { message(answer?.message || '無法加入。'); return answer; }
       // Added: the photo leaves the queue; with none left the editor closes.
       removeItem(item);
@@ -566,7 +719,9 @@
   }
   async function savePicture() {
     if (!photo || adding) return null;
-    const answer = await CharacterDesktop.saveFile(photo.name + '.png', await pngOf(output(photo)));
+    let data;
+    try { data = await pictureOf(photo); } catch (error) { message(String(error.message || error)); return null; }
+    const answer = await CharacterDesktop.saveFile(photo.name + '.png', data);
     if (!answer?.ok && !answer?.cancelled) message(answer?.message || '無法儲存。');
     return answer;
   }
@@ -627,6 +782,8 @@
     name: '圖片去背',
     open,
     close,
+    // Pictures the App would rather have cut out first (a JPG without transparency) can come straight here.
+    takePictures: { label: '去背', load: files => loadFiles(files) },
     test: {
       load: files => loadFiles(files),
       show: index => show(items[index]),
@@ -634,7 +791,7 @@
       save: savePicture,
       state: () => ({
         photo: !!photo, width: photo?.width, height: photo?.height, undo: photo?.undo.length, redo: photo?.redo.length,
-        brush, edges, trim, comparing, queue: items.map(item => item.status), index: items.indexOf(current)
+        brush, edges, trim, comparing, queue: items.map(item => item.status), index: items.indexOf(current), frames: photo?.results?.length || 0
       }),
       pixelAt: (x, y) => [...context(photo.result).getImageData(x, y, 1, 1).data],
       screenOf: (x, y) => { const box = $('cut-canvas').getBoundingClientRect(), at = place(); return { x: box.left + at.left + x * at.pixel, y: box.top + at.top + y * at.pixel }; }

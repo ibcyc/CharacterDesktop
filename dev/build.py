@@ -23,12 +23,14 @@ DEV=Path(__file__).resolve().parent;ROOT=DEV.parent
 SOURCE=DEV/'app';SETTINGS=DEV/'settings';SHARED=DEV/'shared';VENDOR=DEV/'vendor';APP=ROOT/'resources'/'app'
 EXTENSIONS=DEV/'extensions';INSTALLED=ROOT/'Extensions'
 # Shared by both pages, in load order: rules, character kinds and the picture player.
-SHARED_SCRIPTS=[SHARED/'character-rules.js',SHARED/'character-kinds.js',SHARED/'image-player.js']
+# The UI languages come first: the pages are translated from their first moment (shared/i18n.js).
+I18N=['strings-en.js','i18n.js']
+SHARED_SCRIPTS=[SHARED/name for name in I18N]+[SHARED/'character-rules.js',SHARED/'character-kinds.js',SHARED/'image-player.js']
 # Settings page scripts, in load order; they share one script scope.
-SETTINGS_SCRIPTS=SHARED_SCRIPTS+[SETTINGS/name for name in ('preview-controls.js','preview.js','dialog.js','character-panel.js','local-kind.js','desktop-panel.js','download-panel.js','local-panel.js','tuning-panel.js','expression-menu.js','sources-panel.js','ui-panel.js','install-panel.js','app-menu.js','groups-panel.js','tool-host.js','usage-meter.js','settings-app.js','motion.js')]
+SETTINGS_SCRIPTS=SHARED_SCRIPTS+[SETTINGS/name for name in ('preview-controls.js','preview.js','dialog.js','character-panel.js','local-kind.js','desktop-panel.js','download-panel.js','local-panel.js','tuning-panel.js','interaction-panel.js','expression-menu.js','sources-panel.js','ui-panel.js','language-panel.js','install-panel.js','app-menu.js','groups-panel.js','sounds-panel.js','tool-host.js','usage-meter.js','settings-app.js','motion.js')]
 EXE='CharacterDesktop.exe'
 # Files copied as-is into resources/app; pet.html, settings.html, icon.png and package.json are generated.
-RUNTIME=['main.cjs','profiles.cjs','install.cjs','store.cjs','pet-window.cjs','preload.cjs','pet.js','local.cjs','pack.cjs','extensions.cjs','startup.cjs','self-test.cjs','test-helpers.cjs','fresh-self-test.cjs','preview-self-test.cjs','character-self-test.cjs']
+RUNTIME=['main.cjs','profiles.cjs','install.cjs','store.cjs','pet-window.cjs','bubble-window.cjs','preload.cjs','pet.js','local.cjs','pack.cjs','extensions.cjs','startup.cjs','self-test.cjs','test-helpers.cjs','fresh-self-test.cjs','preview-self-test.cjs','character-self-test.cjs']
 # Electron runtime files at the App root (electron.exe is renamed to CharacterDesktop.exe).
 # Electron's own LICENSE is kept as LICENSE.electron, beside the project's LICENSE (MIT).
 ELECTRON_LICENSE='LICENSE.electron'
@@ -46,7 +48,7 @@ def scripts(paths):return '\n'.join(path.read_text(encoding='utf-8') for path in
 
 def pet_html():
  return ('<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="'+CSP+'"><title>角色桌面</title>'
-  '<style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;user-select:none}canvas{display:block;width:100%;height:100%;background:transparent;touch-action:none;cursor:grab}canvas:active{cursor:grabbing}#pet-image{position:absolute;pointer-events:none;transform-origin:50% 100%;-webkit-user-drag:none}</style></head>'
+  '<style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;user-select:none}canvas{display:block;width:100%;height:100%;background:transparent;touch-action:none;cursor:grab}canvas:active{cursor:grabbing}#pet-image{position:absolute;pointer-events:none;transform-origin:50% 100%;-webkit-user-drag:none}body{transform-origin:50% 100%}</style></head>'
   '<body><canvas id="pet-canvas"></canvas><img id="pet-image" alt="" hidden><script>'+scripts(SHARED_SCRIPTS)+'</script><script src="pet.js"></script></body></html>')
 
 def settings_html():
@@ -68,7 +70,7 @@ def settings_html():
   '<button id="local-pick-pack" type="button" title="匯入用右下角選單「匯出」做成的角色包（.cdpack）">角色包</button>'
   '<button id="local-help-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="local-help" title="檔名規則">?</button></div>'
   '<p id="local-help" class="local-help" hidden><b>d</b>：預設樣子（單張圖片會自動改名為 d）<br><b>e1、e2…</b>：表情（放在資料夾裡）<br>'
-  '格式：png、webp、svg、gif（gif 會動）；其他檔名不會匯入。<br>匯入後存在 Data\\Local\\編號，原本的檔案不會變動。<br>'
+  '格式：png、webp、svg、gif、jpg（gif 會動；jpg 沒有透明背景）；其他檔名不會匯入。<br>拖曳圖片到預覽區也可以加入。<br>匯入後存在 Data\\Local\\編號，原本的檔案不會變動。<br>'
   '<b>角色包</b>：匯入用右下角選單「匯出」做成的 .cdpack，角色的設定也一起還原；已經有的角色會問你要跳過或覆蓋。</p>'
   '<form id="local-form" hidden><p id="local-chosen" class="hint"></p><div class="row"><input id="local-name" type="text" aria-label="角色名稱" placeholder="角色名稱" maxlength="40" required spellcheck="false">'
   '<button id="local-add" class="primary" type="submit">加入</button></div></form>'
@@ -76,7 +78,7 @@ def settings_html():
  controls=('<div class="field"><label for="desktop-height">高度 <span id="desktop-height-label"></span></label><input id="desktop-height" type="range" min="180" max="1000" value="500"></div>'
   '<div class="field"><label for="desktop-opacity">透明度 <span id="desktop-opacity-label"></span></label><input id="desktop-opacity" type="range" min="1" max="100" value="100"></div>'
   # How often the character pokes itself; only while it is on the desktop.
-  '<div class="field" id="autopoke-field" hidden><label for="desktop-autopoke">自動戳 <span id="desktop-autopoke-label"></span></label><input id="desktop-autopoke" type="range" min="0" max="600" step="10" value="180"></div>'
+  '<div class="field" id="autopoke-field" hidden><label for="desktop-autopoke">自動戳 <span id="desktop-autopoke-label" data-i18n-context="off"></span></label><input id="desktop-autopoke" type="range" min="0" max="600" step="10" value="180"></div>'
   '<div class="field"><button id="desktop-reset" title="把桌面角色移回畫面內，並讓預覽畫面歸位">找回角色</button></div>'
   '<div class="field" id="local-folder-field" hidden><button id="local-open" type="button">打開檔案所在位置</button></div>'
   '<div class="field" id="startup-field" hidden><label class="switch-row" for="desktop-startup"><span>開機自動啟動</span><input id="desktop-startup" class="switch" type="checkbox" role="switch"></label><p id="startup-status" role="status" aria-live="polite"></p></div>'
@@ -112,6 +114,8 @@ def build_app(target):
  """Write a complete resources/app into target (an empty folder)."""
  target.mkdir(parents=True,exist_ok=True)
  for name in RUNTIME:shutil.copy2(SOURCE/name,target/name)
+ # The app's own process translates the tray and its file dialogs with the same files.
+ for name in I18N:shutil.copy2(SHARED/name,target/name)
  (target/'pet.html').write_text(pet_html(),encoding='utf-8')
  (target/'settings.html').write_text(settings_html(),encoding='utf-8')
  (target/'icon.png').write_bytes(icon_png())

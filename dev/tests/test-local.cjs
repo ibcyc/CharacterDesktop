@@ -23,7 +23,12 @@ try {
 
   // A single picture becomes d, whatever its name; other formats are refused.
   assert.deepEqual(planFile('C:/x/My Photo.PNG').files[0].name, 'd.png');
-  assert.throws(() => planFile('C:/x/a.jpg'), /png、webp、svg、gif/);
+  assert.equal(planFile('C:/x/Photo.JPG').files[0].name, 'd.jpg', 'JPG is taken (it has no transparency)');
+  assert.throws(() => planFile('C:/x/a.bmp'), /png、webp、svg、gif、jpg/);
+  // Pictures without a name (dropped or made on the page) get the extension their bytes call for.
+  const { pictureExtension } = require('../app/local.cjs');
+  assert.deepEqual([PNG, GIF, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]), Buffer.from(SVG), Buffer.from('not a picture')].map(data => pictureExtension(new Uint8Array(data))),
+    ['.png', '.gif', '.jpg', '.svg', ''], 'formats told by their bytes');
 
   // A folder: d and e1, e2… are taken (any case), everything else is listed as not imported.
   const mixed = folderWith(sources, 'My Pet', { 'D.SVG': SVG, 'e1.png': PNG, 'e12.gif': GIF, 'readme.txt': 'x', 'face.png': PNG, 'e0.png': PNG });

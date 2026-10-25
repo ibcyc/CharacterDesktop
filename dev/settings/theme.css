@@ -71,7 +71,28 @@ body.tool-mode :is(.stage,.panel,.top-line,.download-dock,.visibility-dock,.app-
 .layer.editing{border-left:3px solid var(--accent)}
 #group-leave{font-size:12px;padding:7px 12px}#group-leave:not(:disabled):hover{color:#ffb3a8;border-color:rgba(194,82,74,.7)}
 /* 組合 (bottom right): the saved groups above their button. */
-.groups-dock{position:relative}
+.groups-dock,.sounds-dock{position:relative}
+/* 台詞 (interaction-panel.js): the lines window scrolls inside its card; a line said in the preview shows above it. */
+.wide-button{width:100%}
+/* 語言 (language-panel.js): one button per language, the current one lit. */
+.language-choices{display:flex;gap:8px;margin-top:10px}.language-choices button{flex:1}
+.lines-dialog{display:flex;flex-direction:column;max-height:calc(100% - 60px)}.lines-scroll{flex:1;min-height:0;overflow:auto;margin:12px -6px 0;padding:0 6px}
+.lines-group{padding:10px 0;border-top:1px solid var(--edge)}.lines-group:first-child{border-top:0}.lines-group h4{margin:0 0 8px;font-size:12.5px;font-weight:600;color:var(--text)}
+.lines-note{margin:0 0 8px;font-size:11.5px;color:var(--soft)}.lines-group .field{margin:0 0 10px}
+.lines-list{display:flex;flex-direction:column;gap:6px}.line-row{display:flex;gap:6px;align-items:center}.line-row input{flex:1;min-width:0;padding:7px 10px;border:1px solid var(--edge);border-radius:9px;background:var(--well);color:var(--text);font:inherit;outline:none}.line-row input:focus{border-color:var(--accent)}
+.line-row .icon-button{width:32px;height:32px}.lines-add{margin-top:8px;font-size:12px;padding:6px 10px}
+/* 氣泡位置: the character's desktop window (dashed) at a small scale, with room above it; the bubble drawn at the
+   same scale, its tail where it points. */
+.bubble-stage{position:relative;height:250px;border:1px solid var(--edge);border-radius:10px;background:var(--well);overflow:hidden;cursor:crosshair;touch-action:none}
+.bubble-stage-image{position:absolute;outline:1px dashed var(--edge);pointer-events:none}
+.bubble-sample{position:absolute;padding-bottom:7px;transform-origin:50% 100%;pointer-events:none}
+.bubble-sample-text{position:relative;max-width:250px;width:max-content;padding:8px 13px;border-radius:15px;background:#fffdf8;color:#2a2622;font-size:14px;line-height:1.5;box-shadow:0 3px 10px rgba(0,0,0,.3);overflow-wrap:anywhere}
+.bubble-sample-text::after{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-7px;border:7px solid transparent;border-top-color:#fffdf8;border-bottom:0}
+.bubble-sample.auto{opacity:.75}
+.preview-bubble{position:absolute;left:50%;top:13%;max-width:min(320px,70%);width:max-content;padding:9px 15px;border-radius:16px;background:#fffdf8;color:#2a2622;font-size:14px;line-height:1.5;box-shadow:0 3px 12px rgba(0,0,0,.35);overflow-wrap:anywhere;pointer-events:none;opacity:0;transform:translate(-50%,6px) scale(.96);transform-origin:50% 100%;transition:opacity .18s,transform .18s}
+.preview-bubble::after{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-7px;border:7px solid transparent;border-top-color:#fffdf8;border-bottom:0}.preview-bubble.on{opacity:1;transform:translate(-50%,0) scale(1)}
+/* 音效 (sounds-panel.js): the sound library above its button, like 組合's. */
+.sounds-list{display:flex;flex-direction:column;gap:6px}.sound-item .group-name{display:flex;align-items:center;gap:6px}.sound-volume-field{margin:4px 2px 0}.sounds-note{margin:0 2px;font-size:11px;color:var(--soft);line-height:1.5}
 .groups-panel{position:absolute;right:0;bottom:calc(100% + 8px);width:230px;max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--edge);border-radius:14px;background:var(--pane);backdrop-filter:blur(16px);box-shadow:0 12px 32px rgba(0,0,0,.5)}
 .group-item{display:flex;gap:6px;align-items:center}.group-item .group-name{flex:1;min-width:0;text-align:left;font-size:12px;overflow:hidden;text-overflow:ellipsis}
 .group-item.active .group-name{border-color:var(--accent);color:var(--accent)}.group-item .icon-button{width:32px;height:32px}
@@ -117,6 +138,8 @@ html,body{background:transparent}
 body{background:radial-gradient(ellipse at 50% 45%,rgba(30,32,32,var(--tint-center,1)),rgba(0,0,0,var(--tint-edge,1)) 75%)}
 .stage{background:transparent;box-shadow:inset 0 0 200px rgba(0,0,0,var(--vignette,.764))}
 body::after{content:"";position:fixed;inset:0;z-index:60;border:1px solid rgba(255,255,255,.08);pointer-events:none}
+/* Pictures dragged over the window (local-panel.js): a dashed frame shows they can be dropped. */
+body.dropping .stage::after{content:"";position:absolute;inset:16px;border:2px dashed var(--accent);border-radius:20px;pointer-events:none}
 .ui-panel{width:240px}.ui-panel .field{margin:0}.ui-panel .field+.field{margin-top:12px}
 /* The window's own title bar: drag it to move the window (double-click: 最大化); 最小化, 最大化 and 關閉 on the right.
    The side panels start just under it. */

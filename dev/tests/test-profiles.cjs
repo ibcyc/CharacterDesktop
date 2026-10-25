@@ -24,6 +24,22 @@ const off = (opacity = 100) => ({ shown: false, locked: false, opacity });
   });
   assert.deepEqual(Object.keys(settings).sort(), ['active', 'characters', 'groups', 'layers', 'pinned', 'selection', 'ui', 'visible']);
   assert.deepEqual(settings.ui, {}, 'UI settings at their defaults');
+  // Interaction per look, each part with its switch; off keeps what was set. A strength 1–100, sound names only from
+  // the library's own folder, 自動換表情 every 5–300 seconds, short lines (empty ones dropped); the volume 0–100.
+  const off = profiles.cleanInteraction();
+  assert.deepEqual(off, { follow: { on: false, strength: 50 }, sounds: { on: false, poke: '', fifth: '' }, autoFace: { on: false, seconds: 30 }, lines: { on: false, auto: [], poke: [], fifth: [], seconds: 30, place: null } });
+  const set = profiles.cleanProfile({ interaction: {
+    3: { follow: { on: false, strength: 150 }, sounds: { on: 1, poke: 'boop.wav', fifth: '..\\x.wav', extra: 1 }, autoFace: { on: true, seconds: 2 },
+      lines: { on: true, auto: ['  hi  there ', '', 7, 'x'.repeat(80)], poke: 'no', fifth: Array(50).fill('a'), seconds: 900, place: { x: 2, y: -3 } } },
+    winter: off, 'bad key!': { follow: { on: true } }
+  } });
+  assert.deepEqual(set, { interaction: { 3: { follow: { on: false, strength: 100 }, sounds: { on: false, poke: 'boop.wav', fifth: '' }, autoFace: { on: true, seconds: 5 },
+    lines: { on: true, auto: ['hi there', 'x'.repeat(profiles.LINE_LENGTH)], poke: [], fifth: Array(profiles.LINE_COUNT).fill('a'), seconds: 300, place: { x: 1, y: profiles.PLACE_TOP } } } } }, 'per look; defaults dropped');
+  assert.deepEqual([profiles.cleanInteraction({ lines: { place: { x: 0.12345, y: 0.5 } } }).lines.place, profiles.cleanInteraction({ lines: { place: { x: 'a', y: 0 } } }).lines.place], [{ x: 0.123, y: 0.5 }, null]);
+  assert.deepEqual([profiles.interactionFor({ A: set }, 'A', '3').follow.strength, profiles.interactionFor({ A: set }, 'A', '0')], [100, off]);
+  assert.deepEqual(profiles.cleanProfile({ follow: 30, sounds: { poke: 'boop.wav' }, autoFace: 20, lines: { on: true, poke: ['x'] } }).interaction['0'],
+    { follow: { on: true, strength: 30 }, sounds: { on: true, poke: 'boop.wav', fifth: '' }, autoFace: { on: true, seconds: 20 }, lines: { on: true, auto: [], poke: ['x'], fifth: [], seconds: 30, place: null } }, 'kept for the whole character before: the first look');
+  assert.deepEqual([profiles.cleanSettings({ volume: 40 }).volume, 'volume' in profiles.cleanSettings({ volume: profiles.VOLUME_DEFAULT }), profiles.cleanVolume(300)], [40, false, 100]);
   assert.deepEqual([profiles.cleanSettings({ shortcutAsked: true }).shortcutAsked, 'shortcutAsked' in profiles.cleanSettings({ shortcutAsked: 'yes' })], [true, false], 'shortcut offered once');
   assert.deepEqual([profiles.cleanUi({ transparency: 60.4, blur: false }), profiles.cleanUi({ transparency: 150, blur: 'no' }), profiles.cleanUi({ transparency: profiles.UI_DEFAULTS.transparency, blur: true }), profiles.cleanUi({ transparency: null }), profiles.cleanUi('x')],
     [{ transparency: 60, blur: false }, { transparency: 100 }, {}, {}, {}], 'UI settings cleaned');

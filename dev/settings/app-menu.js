@@ -1,15 +1,15 @@
 // The title bar's window buttons (top right) are set up here too, so they work whatever else fails to start.
 // Bottom right: the red power button (quits the app) and, right of it, the app menu: a round button with three
 // lines that opens upward to 來源 (the sources popup), 工具 (the tools extensions bring, tool-host.js), 匯出
-// (every character into a .cdpack), 設定 (UI 設定, ui-panel.js), 重啟 (restart the app) and 還原, whose choices open to
+// (every character into a .cdpack), 設定 (UI 設定, ui-panel.js; 語言, language-panel.js), 重啟 (restart the app) and 還原, whose choices open to
 // its left: 所有角色設定, 完全還原, 還原 UI 設定 and 解除安裝 (install-panel.js). Esc or a press anywhere else closes it, with its popups and its last
 // message.
 
 function setAppMenuOpen(open) {
   $('app-menu').hidden = !open;
   $('app-menu-toggle').setAttribute('aria-expanded', String(open));
-  if (open) setGroupsOpen(false);
-  else { setSourcesOpen(false); setToolsOpen(false); setResetOpen(false); setSettingsMenuOpen(false); setUiOpen(false); $('app-menu-status').textContent = ''; }
+  if (open) { setGroupsOpen(false); setSoundsOpen(false); }
+  else { setSourcesOpen(false); setToolsOpen(false); setResetOpen(false); setSettingsMenuOpen(false); setUiOpen(false); setLanguageOpen(false); $('app-menu-status').textContent = ''; }
 }
 function setResetOpen(open) {
   $('reset-menu').hidden = !open;
@@ -41,12 +41,13 @@ function setUpAppMenu() {
     if (!item) return;
     for (const [id, setOpen] of Object.entries(levels)) if (id !== item.id) setOpen(false);
     setUiOpen(false);
+    setLanguageOpen(false);
   }, true);
   for (const action of ['minimize', 'maximize', 'close']) $('window-' + action).onclick = () => window.desktopAPI.windowAction(action);
   $('relaunch').onclick = () => window.desktopAPI.relaunch();
   $('quit').onclick = () => window.desktopAPI.quit();
   window.addEventListener('keydown', event => { if (event.key === 'Escape') setAppMenuOpen(false); });
   document.addEventListener('pointerdown', event => {
-    if (!$('app-menu').hidden && !event.target.closest?.('.app-dock, #sources-panel, #ui-panel')) setAppMenuOpen(false);
+    if (!$('app-menu').hidden && !event.target.closest?.('.app-dock, #sources-panel, #ui-panel, #language-panel')) setAppMenuOpen(false);
   });
 }

@@ -25,7 +25,7 @@ function setUiOpen(open) {
   $('ui-panel').hidden = !open;
   $('ui-toggle').setAttribute('aria-expanded', String(open));
   // UI 設定 replaces the 設定 submenu it was chosen from.
-  if (open) setSettingsMenuOpen(false);
+  if (open) { setSettingsMenuOpen(false); setLanguageOpen(false); }
 }
 
 function setUpUiPanel(state) {

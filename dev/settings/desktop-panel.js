@@ -41,6 +41,7 @@ function showDesktopOptions(options) {
   showLock($('desktop-lock'), !!options.locked);
   renderLayers(options.layers || []);
   renderGroups(options.groups || []);
+  showInteraction(options.interaction);
   // A group being edited: 保存 / ✕ bottom right, and 從組合中移除 for the member being edited (one stays at least).
   const editing = options.editing;
   $('group-edit').hidden = !editing;
@@ -112,12 +113,14 @@ function renderLayers(layers) {
         item.className = member.id === activeId ? 'current' : '';
         item.dataset.id = member.id;
         item.textContent = library.has(member.id) ? characterLabel(library.get(member.id)) : '角色 #' + member.id;
+        item.translate = !library.has(member.id);
         item.onclick = event => { event.stopPropagation(); if (member.id !== activeId && !busy) selectCharacter(member.id); };
         members.appendChild(item);
       }
       row.append(line, members);
     } else {
       name.textContent = library.has(layer.id) ? characterLabel(library.get(layer.id)) : '角色 #' + layer.id;
+      name.translate = !library.has(layer.id);
       // Shift+click chooses (or lets go of) a character for a group (not one of a group being edited); a plain click
       // edits it.
       row.onclick = event => {

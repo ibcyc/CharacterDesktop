@@ -11,6 +11,7 @@ async function startSettings() {
   window.desktopAPI.onOptions(showDesktopOptions);
   setUpCharacterPanel();
   setUpTuningPanel(state);
+  setUpInteraction();
   setUpExpressionMenus();
   await restoreFromApp(state);
   // Restoring may change the look and with it the height, so the options are read again.
@@ -20,8 +21,11 @@ async function startSettings() {
   setUpLocalPanel(state);
   setUpSourcesPanel(state);
   setUpUiPanel(state);
+  // The first start's question about the language comes before the shortcut's (setUpInstall).
+  setUpLanguage(state);
   setUpInstall(state);
   setUpGroups();
+  setUpSounds();
   setUpTools();
   setUpUsageMeter();
   const news = [...state.extensionProblems, ...state.notices];
@@ -35,12 +39,14 @@ function exposeTestHooks() {
     summary: () => ({ roles: library.size, activeId }),
     idle: () => !!currentKey && ready && !busy,
     lastPoke: () => lastPokePlan,
+    lastSound: () => lastPreviewSound,
+    lastLine: () => lastPreviewLine,
     temporaryExpression: () => activeKind?.test?.temporaryExpression() ?? null,
     kind: id => characterKinds.get(id)?.test,
     tool: id => tools.get(id)?.test,
     moveLayer
   };
-  window.desktopInstallTest = { offerShortcut, uninstallApp };
+  window.desktopInstallTest = { offerShortcut, uninstallApp, askLanguage };
   window.desktopWorkflowTest = { download: downloadFromURL, downloadList, showPicked, addLocal, saveRename, changeTuning, exportPack, importPack };
 }
 

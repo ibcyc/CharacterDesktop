@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 async function run(ctx) {
-  const { app, getPet, getPets, getStack, getRaised, restack, getTray, clickTray, isDragging, getState, stageLocal, dataRoot, report, installCalls, shortcutFile } = ctx;
+  const { app, getPet, getPets, getStack, getRaised, restack, getTray, clickTray, isDragging, getState, stageLocal, dataRoot, report, installCalls, shortcutFile, reviveStuck, getSaid } = ctx;
   const { sleep, waitFor, createChecks, tracesOf, pageHelpers } = ctx.helpers;
   const { results, check } = createChecks();
   const { page, petPage, hidden, settle, choose, click, slide, switchTo, answerDialog, lastPreviewPoke, petMetrics, petReady, desktop } = pageHelpers(ctx);
@@ -216,6 +216,15 @@ async function run(ctx) {
   check('unlocked character drags with the pointer', [isDragging('L1'), dragged.x - dragFromHere.x, dragged.y - dragFromHere.y], [true, 40, 10]);
   await petPage('window.desktopAPI.dragEnd(); true', 'L1'); await sleep(200);
   check('drag ends', isDragging('L1'), false);
+  // At the screen's left and top edges a drag can come to -0.3 px, which once crashed the app; and many quick moves
+  // (fractional on scaled displays) keep the character's size.
+  const edge = require('electron').screen.getDisplayMatching(dragged).workArea, sizeBefore = [dragged.width, dragged.height];
+  getPet('L1').setBounds({ ...dragged, x: edge.x, y: edge.y });
+  await petPage(`window.desktopAPI.dragStart(100, 100); for (let i = 0; i < 60; i++) window.desktopAPI.dragTo(99.7 + (i % 3) * 0.45, 99.6 + (i % 2) * 0.7); window.desktopAPI.dragTo(99.7, 99.6); true`, 'L1'); await sleep(300);
+  const atEdge = getPet('L1').getBounds();
+  check('drag at the screen edge', [isDragging('L1'), atEdge.x, atEdge.y, [atEdge.width, atEdge.height]], [true, edge.x, edge.y, sizeBefore]);
+  await petPage('window.desktopAPI.dragEnd(); true', 'L1'); await sleep(200);
+  getPet('L1').setBounds(dragged);
   await page(layerButton('L2', 'lock'));
   await sleep(400);
   check('L2 locked from its layer row', getState().characters.L2.desktop.locked, true);
@@ -438,7 +447,7 @@ async function run(ctx) {
   check('tray right click opens settings, nothing else', [getState().options.visible, ctx.getSettings().isDestroyed()], [true, false]);
   check('power button left of the menu button (never used by the self-tests)', [await page(`(() => {
     const power = $('quit').getBoundingClientRect(), menu = $('app-menu-toggle').getBoundingClientRect();
-    return [$('quit').getAttribute('aria-label'), power.right <= menu.left && power.right > menu.left - 70, Math.abs(power.top - menu.top) < 1];
+    return [$('quit').getAttribute('aria-label'), power.right <= menu.left && power.right > menu.left - 130, Math.abs(power.top - menu.top) < 1];
   })()`), await page('window.desktopAPI.quit()')], [['結束程序', true, true], false]);
   // The window's own title bar (the window is transparent, without the system's frame): 最小化, 最大化, 關閉 at the top
   // right; the side panels start under it.
@@ -467,7 +476,7 @@ async function run(ctx) {
   const ui = () => page(`[$('ui-panel').hidden, $('ui-transparency').value, $('ui-transparency-label').textContent, getComputedStyle(document.documentElement).getPropertyValue('--tint-edge'), $('ui-blur').checked, $('ui-blur-field').hidden]`);
   const buttonLook = () => page(`getComputedStyle($('sources-toggle')).backgroundColor`), lookBefore = await buttonLook();
   await page(`$('app-menu-toggle').click(); $('settings-toggle').click(); true`);
-  check('設定 choices', await page(`[[...$('settings-menu').children].filter(button => !button.hidden).map(button => button.textContent), $('settings-menu').getBoundingClientRect().right <= $('settings-toggle').getBoundingClientRect().left]`), [['UI 設定', '桌面捷徑'], true]);
+  check('設定 choices', await page(`[[...$('settings-menu').children].filter(button => !button.hidden).map(button => button.textContent), $('settings-menu').getBoundingClientRect().right <= $('settings-toggle').getBoundingClientRect().left]`), [['UI 設定', '語言', '桌面捷徑'], true]);
   await page(`$('reset-toggle').click(); true`);
   check('one submenu at a time', await page(`[$('settings-menu').hidden, $('reset-menu').hidden]`), [true, false]);
   await page(`$('settings-toggle').click(); $('ui-toggle').click(); true`);
@@ -700,9 +709,300 @@ async function run(ctx) {
   fs.writeFileSync(broken, 'not a pack');
   ctx.setFileTest({ importFile: broken });
   check('not a pack', await page('desktopWorkflowTest.importPack()'), { ok: false, message: '不是有效的角色包（.cdpack）。' });
+  // 15. Pictures dropped on the window: with local characters a menu asks where, once for all (新角色, or the next
+  // expressions of one of them); a JPG (no transparency) asks first; other files are refused.
+  const dropFiles = files => page(`(async () => {
+    const make = async ([name, type, color]) => {
+      if (type === 'text/plain') return new File(['x'], name, { type });
+      const canvas = new OffscreenCanvas(40, 80), context = canvas.getContext('2d');
+      context.fillStyle = color;
+      context.fillRect(0, 0, 40, 80);
+      return new File([await canvas.convertToBlob({ type })], name, { type });
+    };
+    const data = new DataTransfer();
+    for (const file of await Promise.all(${JSON.stringify(files)}.map(make))) data.items.add(file);
+    const at = { bubbles: true, cancelable: true, clientX: 400, clientY: 300, dataTransfer: data };
+    $('stage').dispatchEvent(new DragEvent('dragenter', at));
+    const framed = document.body.classList.contains('dropping');
+    $('stage').dispatchEvent(new DragEvent('dragover', at));
+    $('stage').dispatchEvent(new DragEvent('drop', at));
+    return [framed, document.body.classList.contains('dropping')];
+  })()`);
+  const dropMenu = () => page(`$('drop-menu').hidden ? null : [...$('drop-menu').children].map(button => button.textContent)`);
+  const chooseDrop = label => page(`[...$('drop-menu').children].find(button => button.textContent.includes(${JSON.stringify(label)})).click(); true`);
+  const entryNamed = name => getState().library.find(entry => entry.name === name);
+  check('drop: framed while over the window', await dropFiles([['Dropped.png', 'image/png', '#36c']]), [true, false]);
+  check('drop: where to add', await dropMenu(), ['新角色', '[L] Renamed']);
+  await chooseDrop('新角色');
+  await waitFor(() => entryNamed('Dropped'), 'dropped picture added');
+  await settle();
+  check('dropped as a new character', [entryNamed('Dropped').files, getState().selection.characterId === entryNamed('Dropped').id, await page(`$('drop-menu').hidden`)], [{ 0: 'd.png' }, true, true]);
+  await dropFiles([['Smile.png', 'image/png', '#3c6'], ['Wink.png', 'image/png', '#c36']]);
+  await chooseDrop('Dropped');
+  await waitFor(() => Object.keys(entryNamed('Dropped').files).length === 3, 'dropped expressions added');
+  await settle();
+  check('dropped as expressions, once for all', entryNamed('Dropped').files, { 0: 'd.png', 1: 'e1.png', 2: 'e2.png' });
+  await dropFiles([['Photo.jpg', 'image/jpeg', '#c63']]);
+  await chooseDrop('新角色');
+  check('JPG asks first (no tool takes pictures here)', await page(`(async () => { while ($('dialog').hidden) await new Promise(resolve => setTimeout(resolve, 50)); return [$('dialog-message').textContent, [...$('dialog-buttons').children].map(button => button.textContent)]; })()`),
+    ['JPG 沒有透明背景', ['取消', '加入']]);
+  await answerDialog('cancel');
+  await sleep(300);
+  check('JPG not added when cancelled', !!entryNamed('Photo'), false);
+  await dropFiles([['Photo.jpg', 'image/jpeg', '#c63']]);
+  await chooseDrop('新角色');
+  await answerDialog('add');
+  await waitFor(() => entryNamed('Photo'), 'JPG added');
+  await settle();
+  check('JPG added', entryNamed('Photo').files, { 0: 'd.jpg' });
+  await dropFiles([['notes.txt', 'text/plain']]);
+  await sleep(200);
+  check('other files refused', [await dropMenu(), await page(`[$('local-panel').hidden, $('local-status').textContent]`)], [null, [false, '只接受 png、webp、svg、gif、jpg 圖片。']]);
+  // 16. 滑鼠跟隨 and 互動音效, for every character. The sound library is Data\Sounds: its panel (♪, left of 組合) lists
+  // the sounds, plays and deletes them, and sets the volume. A poke plays the chosen sound, every fifth poke its own.
+  const wav = () => {
+    const samples = 400, data = Buffer.alloc(44 + samples, 128);
+    data.write('RIFF', 0); data.writeUInt32LE(36 + samples, 4); data.write('WAVEfmt ', 8); data.writeUInt32LE(16, 16); data.writeUInt16LE(1, 20); data.writeUInt16LE(1, 22);
+    data.writeUInt32LE(8000, 24); data.writeUInt32LE(8000, 28); data.writeUInt16LE(1, 32); data.writeUInt16LE(8, 34); data.write('data', 36); data.writeUInt32LE(samples, 40);
+    return data;
+  };
+  fs.mkdirSync(path.join(dataRoot, 'Sounds'), { recursive: true });
+  for (const name of ['boop.wav', 'ding.wav']) fs.writeFileSync(path.join(dataRoot, 'Sounds', name), wav());
+  fs.writeFileSync(path.join(dataRoot, 'Sounds', 'notes.txt'), 'x');
+  const soundItems = () => page(`[...$('sounds-list').querySelectorAll('.sound-item')].map(item => item.dataset.name)`);
+  await page(`$('sounds-toggle').click(); true`);
+  await waitFor(async () => (await soundItems()).length === 2, 'sound library');
+  check('formats said under 打開資料夾', await page(`$('sounds-open').nextElementSibling.textContent`), '支援 mp3、wav、ogg、m4a、flac，每個檔案 20 MB 以內。');
+  check('sound library', [await soundItems(), await page(`$('sound-volume').value`), await page(`(() => {
+    const sounds = $('sounds-toggle').getBoundingClientRect(), power = $('quit').getBoundingClientRect(), groups = $('groups-toggle').getBoundingClientRect();
+    return power.right <= sounds.left && sounds.right <= groups.left && Math.abs(sounds.top - groups.top) < 1;
+  })()`)], [['boop.wav', 'ding.wav'], '70', true]);
+  await page(`$('sound-volume').value = 40; $('sound-volume').dispatchEvent(new Event('input')); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`);
+  await waitFor(() => savedFile('settings.json').volume === 40, 'volume saved');
+  await switchTo('L1');
+  const look1 = () => getState().characters.L1.interaction?.['0'];   // a local character has one look
+  check('follow and sounds offered', await page(`[$('follow-field').hidden, $('follow-strength-field').hidden, $('sound-field').hidden, $('sound-options').hidden]`), [false, true, false, true]);
+  await page(`$('follow-toggle').click(); true`);
+  await waitFor(() => look1()?.follow.on && look1().follow.strength === 50, 'follow on');
+  await waitFor(async () => { const metrics = await petMetrics('L1'); return metrics.follow === 50 && metrics.cursors > 0; }, 'the cursor goes to L1');
+  check('follow strength', await page(`[$('follow-strength-field').hidden, $('follow-strength-label').textContent]`), [false, '50%']);
+  check('leaning toward the cursor', await petPage(`(() => {
+    desktopTest.leanToward({ x: innerWidth * 3, y: 0 });
+    const right = desktopTest.getMetrics().leanTarget;
+    desktopTest.leanToward({ x: -innerWidth * 3, y: 0 });
+    return [right > 3 && right <= 4, desktopTest.getMetrics().leanTarget < -3];
+  })()`, 'L1'), [true, true]);
+  await page(`$('follow-strength').value = 100; $('follow-strength').dispatchEvent(new Event('input')); true`);
+  await waitFor(() => look1()?.follow.strength === 100, 'stronger');
+  await page(`$('sound-toggle').click(); true`);
+  await waitFor(() => look1()?.sounds.on, 'sounds on');
+  check('sound menus', await page(`[$('sound-options').hidden, [...$('sound-poke').options].map(option => option.textContent)]`), [false, ['無', 'boop', 'ding']]);
+  await page(`$('sound-poke').value = 'boop.wav'; $('sound-poke').dispatchEvent(new Event('change')); $('sound-fifth').value = 'ding.wav'; $('sound-fifth').dispatchEvent(new Event('change')); true`);
+  await waitFor(async () => (await petMetrics('L1')).sounds?.fifth === 'ding.wav', 'L1 has its sounds');
+  const pokeSounds = [];
+  for (let i = 0; i < 5; i++) {
+    await petPage('desktopTest.poke({ x: innerWidth / 2, y: innerHeight * 0.6 }); true', 'L1');
+    const metrics = await petMetrics('L1');
+    pokeSounds.push((metrics.pokeCount % 5 === 0 ? 'fifth:' : '') + metrics.lastSound);
+    await sleep(150);
+  }
+  check('poke sounds', [pokeSounds.filter(sound => sound === 'fifth:ding.wav').length, pokeSounds.filter(sound => sound === 'boop.wav').length], [1, 4]);
+  // Pokes in the preview play them too.
+  const previewSounds = [];
+  for (let i = 0; i < 5; i++) {
+    await waitFor(() => page('desktopSettingsTest.idle()'), 'preview ready');
+    await page(`$('viewer-canvas').dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true })); true`);
+    previewSounds.push(await page('desktopSettingsTest.lastSound()'));
+  }
+  check('preview poke sounds', previewSounds, ['boop.wav', 'boop.wav', 'boop.wav', 'boop.wav', 'fifth:ding.wav']);
+  await page(`$('sounds-toggle').click(); true`);
+  await waitFor(async () => (await soundItems()).length === 2, 'library again');
+  await page(`[...$('sounds-list').querySelectorAll('.sound-item')].find(item => item.dataset.name === 'ding.wav').querySelector('.icon-button').click(); true`);
+  await answerDialog('ok');
+  await waitFor(() => !fs.existsSync(path.join(dataRoot, 'Sounds', 'ding.wav')) && look1()?.sounds.fifth === '', 'sound deleted, kept by no one');
+  await waitFor(async () => (await soundItems()).length === 1, 'library without it');
+  check('sound deleted', [await soundItems(), look1().sounds], [['boop.wav'], { on: true, poke: 'boop.wav', fifth: '' }]);
+  await page(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`);
+  await page(`$('follow-toggle').click(); $('sound-toggle').click(); true`);
+  await waitFor(() => !look1().follow.on && !look1().sounds.on, 'follow and sounds off');
+  check('off keeps what was set', [look1().follow.strength, look1().sounds.poke, (await petMetrics('L1')).follow, (await petMetrics('L1')).sounds], [100, 'boop.wav', 0, null]);
+  // 17. 自動換表情 and 台詞, under 互動音效: every few seconds another expression, until a poke; lines (edited in their
+  // own window) said in a bubble above the character on the desktop and in the preview. Out with a group a character
+  // neither follows nor speaks.
+  check('auto expressions and lines offered', await page(`[$('autoface-field').hidden, $('autoface-seconds-field').hidden, $('lines-field').hidden, $('lines-edit-field').hidden]`), [false, true, false, true]);
+  await page(`$('autoface-toggle').click(); true`);
+  await waitFor(() => look1()?.autoFace.on && look1().autoFace.seconds === 30, 'auto expressions on');
+  await waitFor(async () => (await petMetrics('L1')).autoFace === 30, 'L1 changes expressions');
+  check('auto expression interval', await page(`[$('autoface-seconds-field').hidden, $('autoface-seconds-label').textContent]`), [false, '30 秒']);
+  await petPage('desktopTest.changeFace(); true', 'L1');
+  const changed = await petMetrics('L1');
+  await petPage('desktopTest.poke({ x: innerWidth / 2, y: innerHeight * 0.6 }); true', 'L1');
+  const afterPoke = await petMetrics('L1');
+  check('another expression until a poke', [typeof changed.autoExpression === 'string' && changed.autoExpression !== getState().characters.L1.expression, changed.auto === changed.autoExpression, afterPoke.autoExpression, afterPoke.auto],
+    [true, true, null, null]);
+  await page(`$('lines-toggle').click(); true`);
+  await waitFor(() => look1()?.lines.on, 'lines on');
+  check('lines button', await page(`[$('lines-edit-field').hidden, $('lines-edit').textContent]`), [false, '編輯台詞']);
+  await page(`$('lines-edit').click(); true`);
+  check('lines window', await page(`[$('lines-dialog').hidden, [...$('lines-dialog').querySelectorAll('h4')].map(heading => heading.textContent), $('lines-auto-note').hidden, $('lines-seconds-field').hidden,
+    $('lines-dialog').querySelectorAll('.line-row').length, document.activeElement === $('lines-dialog').querySelector('[data-list="auto"] .line-row input'), getComputedStyle($('lines-dialog').querySelector('.lines-scroll')).overflowY]`),
+    [false, ['自動說的', '戳的時候', '戳第 5 下', '氣泡位置'], false, true, 3, true, 'auto']);
+  await page(`(() => {
+    const type = (list, text) => { const inputs = $('lines-dialog').querySelectorAll('[data-list="' + list + '"] .line-row input'); inputs[inputs.length - 1].value = text; };
+    type('auto', 'Hello');
+    $('lines-dialog').querySelector('[data-list="auto"] .line-row input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    type('auto', 'Hi there');
+    type('poke', 'Ouch');
+    type('fifth', '  Stop   it! ');
+    $('lines-dialog').querySelector('[data-list="fifth"] .lines-add').click();
+    $('lines-save').click();
+    return true;
+  })()`);
+  await waitFor(() => look1()?.lines.poke.length === 1, 'lines saved');
+  check('lines saved', [look1().lines, await page(`[$('lines-dialog').hidden, $('lines-edit').textContent]`)],
+    [{ on: true, auto: ['Hello', 'Hi there'], poke: ['Ouch'], fifth: ['Stop it!'], seconds: 30, place: null }, [true, '編輯台詞（4 句）']]);
+  await waitFor(async () => (await petMetrics('L1')).lines?.fifth.length === 1, 'L1 has its lines');
+  await petPage('desktopTest.changeFace(); true', 'L1');
+  const autoSaid = await petMetrics('L1');
+  await waitFor(() => getSaid('L1')?.text === autoSaid.lastLine, 'said above L1');
+  check('a line with each change', [['Hello', 'Hi there'].includes(autoSaid.lastLine), autoSaid.autoLines, Number.isFinite(getSaid('L1').point.x) && Number.isFinite(getSaid('L1').point.y)], [true, 0, true]);
+  const pokeLines = [];
+  for (let i = 0; i < 5; i++) {
+    await petPage('desktopTest.poke({ x: innerWidth / 2, y: innerHeight * 0.6 }); true', 'L1');
+    const metrics = await petMetrics('L1');
+    pokeLines.push((metrics.pokeCount % 5 === 0 ? 'fifth:' : '') + metrics.lastLine);
+    await sleep(150);
+  }
+  check('poke lines', [...pokeLines].sort(), ['Ouch', 'Ouch', 'Ouch', 'Ouch', 'fifth:Stop it!']);
+  const previewLines = [];
+  for (let i = 0; i < 5; i++) {
+    await waitFor(() => page('desktopSettingsTest.idle()'), 'preview ready');
+    await page(`$('viewer-canvas').dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true })); true`);
+    previewLines.push(await page('desktopSettingsTest.lastLine()'));
+  }
+  check('preview lines', [previewLines, await page(`[$('preview-bubble').hidden, $('preview-bubble').textContent]`)], [['Ouch', 'Ouch', 'Ouch', 'Ouch', 'Stop it!'], [false, 'Stop it!']]);
+  // Without 自動換表情 the automatic lines come every few seconds; Esc leaves the lines as they were.
+  await page(`$('autoface-toggle').click(); true`);
+  await waitFor(async () => { const metrics = await petMetrics('L1'); return metrics.autoFace === 0 && metrics.autoLines === 30; }, 'automatic lines on their own');
+  await page(`$('lines-edit').click(); true`);
+  check('lines every few seconds', await page(`[$('lines-auto-note').hidden, $('lines-seconds-field').hidden, $('lines-seconds-label').textContent, [...$('lines-dialog').querySelectorAll('.line-row input')].map(input => input.value)]`),
+    [true, false, '30 秒', ['Hello', 'Hi there', 'Ouch', 'Stop it!']]);
+  await page(`$('lines-seconds').value = 10; $('lines-seconds').dispatchEvent(new Event('input')); $('lines-dialog').querySelector('[data-list="poke"] input').value = 'Changed'; document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`);
+  check('Esc leaves them', [await page(`$('lines-dialog').hidden`), look1().lines.poke, look1().lines.seconds], [true, ['Ouch'], 30]);
+  await page(`$('lines-edit').click(); $('lines-seconds').value = 10; $('lines-seconds').dispatchEvent(new Event('input')); $('lines-save').click(); true`);
+  await waitFor(async () => (await petMetrics('L1')).autoLines === 10, 'automatic lines every 10 seconds');
+  // 氣泡位置: the character's window in the lines window; pressing in it moves where the bubble points, kept as
+  // fractions of the window; 自動 goes back to the top of the character.
+  await page(`$('lines-edit').click(); true`);
+  await waitFor(() => page(`!$('bubble-stage').hidden`), 'bubble stage');
+  check('bubble stage', await page(`[$('bubble-sample-text').textContent, $('bubble-place-auto').hidden, $('bubble-sample').classList.contains('auto'), $('bubble-stage-image').getBoundingClientRect().height > 100]`), ['Hello', true, true, true]);
+  await page(`(() => {
+    const image = $('bubble-stage-image').getBoundingClientRect();
+    $('bubble-stage').dispatchEvent(new PointerEvent('pointerdown', { button: 0, buttons: 1, clientX: image.left + image.width * 0.25, clientY: image.top + image.height * 0.1, bubbles: true }));
+    $('lines-save').click();
+    return true;
+  })()`);
+  await waitFor(() => look1().lines.place, 'bubble place saved');
+  const place = look1().lines.place;
+  check('bubble place', [Math.abs(place.x - 0.25) < 0.02, Math.abs(place.y - 0.1) < 0.02], [true, true]);
+  await waitFor(async () => (await petMetrics('L1')).lines?.place, 'L1 has the place');
+  const [petWidth, petHeight] = await petPage('[innerWidth, innerHeight]', 'L1');
+  await petPage('desktopTest.sayAuto(); true', 'L1');
+  await waitFor(() => JSON.stringify(getSaid('L1')?.point) === JSON.stringify({ x: Math.round(place.x * petWidth), y: Math.round(place.y * petHeight) }), 'said where placed');
+  await page(`$('lines-edit').click(); true`);
+  await waitFor(() => page(`!$('bubble-stage').hidden && !$('bubble-place-auto').hidden && !$('bubble-sample').classList.contains('auto')`), 'the place shown');
+  await page(`$('bubble-place-auto').click(); $('lines-save').click(); true`);
+  await waitFor(() => look1().lines.place === null, 'back to the top of the character');
+  // Out with a group: neither following nor speaking, until the group goes.
+  // Following again: as strong as it was set before it was switched off.
+  await page(`$('follow-toggle').click(); true`);
+  await waitFor(async () => (await petMetrics('L1')).follow === 100, 'L1 follows');
+  check('following as before', await page(`[$('follow-strength-field').hidden, $('follow-strength').value, $('follow-strength-label').textContent]`), [false, '100', '100%']);
+  const talker = entryNamed('Dropped').id;
+  const talkerOut = getPets().includes(talker);
+  await switchTo(talker);
+  if (!talkerOut) await click('desktop-visible');
+  await waitFor(() => getPets().includes(talker), 'Dropped on the desktop');
+  await petReady(talker);
+  const talkers = await page(`window.desktopAPI.createGroup('Talkers', ['L1', ${JSON.stringify(talker)}])`);
+  await waitFor(async () => { const metrics = await petMetrics('L1'); return metrics.follow === 0 && metrics.lines === null; }, 'quiet in a group');
+  const quiet = await petMetrics('L1');
+  check('in a group: no following, no lines', [talkers.ok, quiet.follow, quiet.lines, quiet.autoLines], [true, 0, null, 0]);
+  await page(`window.desktopAPI.deleteGroup(${JSON.stringify(talkers.id)})`);
+  await waitFor(async () => { const metrics = await petMetrics('L1'); return metrics.follow === 100 && metrics.lines?.on === true; }, 'following and speaking again');
+  if (!talkerOut) {
+    await switchTo(talker);
+    await click('desktop-visible');
+    await waitFor(() => !getPets().includes(talker), 'Dropped off the desktop');
+  }
+  await switchTo('L1');
+  // Lines off keeps them for later.
+  await page(`$('follow-toggle').click(); $('lines-toggle').click(); true`);
+  await waitFor(async () => { const metrics = await petMetrics('L1'); return metrics.follow === 0 && metrics.lines === null && metrics.autoLines === 0; }, 'L1 quiet again');
+  check('lines off, kept', [look1().lines.on, look1().lines.auto, await page(`$('lines-edit-field').hidden`)], [false, ['Hello', 'Hi there'], true]);
+  // A window that stops hearing the mouse (a Windows quirk) is revived when the mouse moves over it: its size one
+  // pixel larger and back, at most every 3 seconds; one whose page hears the mouse is left alone.
+  const stuckId = getPets()[0], stuckBounds = getPet(stuckId).getBounds(), over = { x: stuckBounds.x + 10, y: stuckBounds.y + 10 };
+  await sleep(3100);
+  await petPage(`window.dispatchEvent(new MouseEvent('mousemove', { clientX: 10, clientY: 10 })); true`, stuckId);
+  await sleep(200);
+  const heard = reviveStuck(over);
+  const firstRevive = reviveStuck(over, Date.now() + 1000);
+  const tooSoon = reviveStuck(over, Date.now() + 2000);
+  check('a window that lost the mouse is revived', [firstRevive.includes(stuckId), tooSoon, heard, reviveStuck({ x: -99999, y: -99999 }, Date.now() + 5000), getPet(stuckId).getBounds()], [true, [], [], [], stuckBounds]);
+  // A character window that is gone (as while the App closes) leaves the list at once; stacking again never touches it.
+  const goneId = getPets()[0];
+  getPet(goneId).destroy();
+  await sleep(100);
+  let restacked = true;
+  try { restack(); restack({ gentle: true }); } catch { restacked = false; }
+  check('a window gone is left alone', [getPets().includes(goneId), restacked], [false, true]);
   check('nothing left from importing', fs.readdirSync(dataRoot).filter(name => name.startsWith('Import-')), []);
   check('no page errors', await page('!!window.playerFailed'), false);
   check('hint unchanged at the end', await page(`$('status').textContent`), '滾輪縮放 · 右鍵拖曳 · 左鍵互動');
+  // 18. 語言 (設定 › 語言): in English the page starts again, and no Chinese is left on it but names and lines
+  // (translate="no"), whatever panel or question is open; the tray speaks it too. The first start's question, in both
+  // languages, brings back 繁體中文.
+  await page(`$('app-menu-toggle').click(); $('settings-toggle').click(); $('language-toggle').click(); true`);
+  check('language panel', await page(`[$('language-panel').hidden, $('settings-menu').hidden, [...$('language-choices').children].map(button => [button.textContent, button.getAttribute('aria-pressed')])]`),
+    [false, true, [['繁體中文', 'true'], ['English', 'false']]]);
+  await page(`$('language-choices').children[1].click(); true`);
+  await waitFor(() => page(`document.documentElement.lang === 'en' && !!window.desktopSettingsTest && desktopSettingsTest.idle()`), 'the page in English');
+  await settle();
+  const chineseLeft = () => page(`(() => {
+    const ideograph = /[\\u4e00-\\u9fff]/, left = [], kept = element => !!element?.closest('[translate="no"], script, style');
+    const walker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (node.nodeType === Node.TEXT_NODE) { if (ideograph.test(node.nodeValue) && !kept(node.parentElement)) left.push(node.nodeValue.trim()); continue; }
+      if (kept(node)) continue;
+      for (const name of ['title', 'aria-label', 'placeholder', 'alt']) if (ideograph.test(node.getAttribute(name) || '')) left.push(name + ': ' + node.getAttribute(name));
+    }
+    return [...new Set(left)];
+  })()`);
+  await page(`$('app-menu-toggle').click(); $('groups-toggle').click(); true`);
+  await page(`$('sounds-toggle').click(); true`);
+  await page(`$('sounds-list').querySelector('.icon-button').click(); true`);
+  await waitFor(() => page(`!$('dialog').hidden`), 'a question in English');
+  const question = await page(`[$('dialog-message').textContent, $('dialog-detail').textContent, [...$('dialog-buttons').children].map(button => button.textContent)]`);
+  const leftWithQuestion = await chineseLeft();
+  await answerDialog('cancel');
+  await page(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); $('lines-toggle').checked || $('lines-toggle').click(); true`);
+  await waitFor(() => page(`!$('lines-edit-field').hidden`), 'lines on');
+  await page(`$('lines-edit').click(); true`);
+  check('in English', [leftWithQuestion, await chineseLeft(), question, await page(`[$('relaunch').textContent, $('status').textContent, $('lines-edit').textContent, $('quit').title]`), getTray()],
+    [[], [], ['Delete the sound "boop.wav"?', 'Characters that use it will no longer play it.', ['Cancel', 'Delete']],
+      ['Restart', 'Wheel: zoom · Right-drag: move · Left-click: interact', 'Edit lines (4)', 'Quit'], 'CharacterDesktop: left-click hides all · right-click opens settings']);
+  await page(`$('lines-cancel').click(); $('lines-toggle').click(); true`);
+  await page(`desktopInstallTest.askLanguage(); true`);
+  await waitFor(() => page(`!$('dialog').hidden`), 'the language question');
+  check('language question', await page(`[$('dialog-title').textContent, $('dialog-message').textContent, [...$('dialog-buttons').children].map(button => button.textContent)]`),
+    ['Language · 語言', '請選擇語言\nChoose a language', ['繁體中文', 'English']]);
+  await answerDialog('zh-Hant');
+  await waitFor(() => page(`document.documentElement.lang === 'zh-Hant' && !!window.desktopSettingsTest && desktopSettingsTest.idle()`), 'the page in Chinese again');
+  await settle();
+  await waitFor(() => savedFile('settings.json').language === 'zh-Hant', 'language kept');
+  check('Chinese again', [await page(`[$('relaunch').textContent, $('status').textContent]`), getTray(), savedFile('settings.json').language], [['重啟', '滾輪縮放 · 右鍵拖曳 · 左鍵互動'], '角色桌面：左鍵全隱藏 · 右鍵開啟設定', 'zh-Hant']);
   hidden();
   fs.writeFileSync(report, JSON.stringify({ ok: true, results }, null, 1));
   app.exit(0);

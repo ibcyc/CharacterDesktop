@@ -28,16 +28,20 @@
 //   apply(packet)                   show or update the character; packet = { entry, selection, options, mirror, tuning }
 //                                   (pictures: CharacterDesktop.imagePlayer() and CharacterDesktop.fitPicture())
 //   unload(), poke(point) -> plan, opaqueAt(x, y), fit()   (fit: the window was resized), test (optional)
+//   expressions() -> ids            the expressions it can show, for 自動換表情 (optional, with setAutoExpression)
+//   setAutoExpression(id | null)    show this expression instead of the chosen one (a poke's still comes first);
+//                                   null: the chosen one again
 
 const characterKinds = new Map();
 function registerCharacterKind(id, kind) { characterKinds.set(id, kind); }
 function kindOf(entry) { return entry ? characterKinds.get(isLocal(entry) ? 'local' : entry.extension) || null : null; }
 function characterLabel(entry) { return kindOf(entry)?.label?.(entry) ?? entry.name; }
 
-// The parts of this page that extensions bring: their styles, their markup (into the page's data-slot elements) and
-// their scripts, run in that order.
+// The parts of this page that extensions bring: their text in the app's language (shared/i18n.js), their styles, their
+// markup (into the page's data-slot elements) and their scripts, run in that order.
 async function loadExtensionPages(page) {
   for (const part of await window.desktopAPI.extensionPages(page)) {
+    translator.add(part.strings);
     for (const css of part.styles) {
       const style = document.createElement('style');
       style.textContent = css;

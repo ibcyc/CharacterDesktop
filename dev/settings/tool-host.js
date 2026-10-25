@@ -1,5 +1,7 @@
 // Tools (工具, in the app menu): an extension registers one from its page script with registerTool(id, { name,
-// open(), close() }); without any, 工具 is not shown. Opening one turns the window into the tool's own editor: the
+// open(), close() }); without any, 工具 is not shown. A tool that works on pictures can add
+// takePictures: { label, load(files) }: the App then offers it (its label as a button) for pictures that are
+// better worked on first, such as a JPG without transparency, and opens it with them. Opening one turns the window into the tool's own editor: the
 // character page is hidden and #tool-host (holding the tool's markup, from its "tool" slot) takes the window. The
 // tool calls CharacterDesktop.closeTool() to come back; the page then starts again from the library (the tool may
 // have added a character). The characters on the desktop stay as they are.
@@ -8,6 +10,14 @@ const tools = new Map();
 let toolOpen = '';
 
 function registerTool(id, tool) { tools.set(id, tool); }
+
+// The tools that take pictures: [{ id, label }].
+const pictureTools = () => [...tools].filter(([, tool]) => typeof tool.takePictures?.load === 'function').map(([id, tool]) => ({ id, label: String(tool.takePictures.label || tool.name) }));
+async function openToolWith(id, files) {
+  if (!await openTool(id)) return false;
+  await tools.get(id).takePictures.load(files);
+  return true;
+}
 
 function setToolsOpen(open) {
   $('tools-menu').hidden = !open;

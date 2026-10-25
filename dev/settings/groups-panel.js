@@ -9,7 +9,7 @@ const TRASH = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true
 function setGroupsOpen(open) {
   $('groups-panel').hidden = !open;
   $('groups-toggle').setAttribute('aria-expanded', String(open));
-  if (open) setAppMenuOpen(false); else $('groups-panel').querySelector('.groups-status')?.replaceChildren();
+  if (open) { setAppMenuOpen(false); setSoundsOpen(false); } else $('groups-panel').querySelector('.groups-status')?.replaceChildren();
 }
 
 function renderGroups(groups) {

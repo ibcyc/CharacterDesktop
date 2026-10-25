@@ -49,6 +49,7 @@ function syncCharacterControls() {
   $('mirror-toggle').checked = profiles[activeId]?.mirror === true;
   for (const kind of characterKinds.values()) kind.sync(currentEntry());
   syncTuningControls();
+  syncInteraction();
 }
 
 // The character menu (a list menu, expression-menu.js): a pin on each character; pinned ones come first.
@@ -132,6 +133,8 @@ function setUpCharacterPanel() {
   });
   $('character-delete').onclick = deleteCharacter;
   characterMenu = createExpressionMenu($('character'), { preview: false, decorate: pinOf });
+  // Names stay as they are in every language.
+  for (const id of ['character', 'character-button', 'character-list']) $(id).translate = false;
   $('mirror-toggle').onchange = event => setMirror(event.target.checked);
   // Right-clicking a character on the desktop edits it here.
   window.desktopAPI.onEditCharacter(id => { if (id !== activeId && library.has(id) && !busy) selectCharacter(id); });

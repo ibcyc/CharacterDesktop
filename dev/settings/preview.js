@@ -118,6 +118,8 @@ const CharacterDesktop = {
   // A panel of the bottom-left dock (the extension's own, from its "dock" markup) opened or closed, one at a time.
   dockPanel: (panel, open) => setDockPanel(panel, open),
   confirm: (message, options) => confirmDialog(message, options),
+  // A question with buttons of the caller's own ([{ label, value, kind }]); resolves the value chosen.
+  ask: question => askDialog(question).then(answer => answer.value),
   // After an extension changed characters in the app: the page starts again from the library.
   refresh: async () => restoreFromApp(await window.desktopAPI.getState()),
   saveOptions: options => saveCharacterOptions(options),
@@ -143,6 +145,7 @@ async function selectCharacter(id, start = previewHooks.startFor(String(id))) {
 function poke(event) {
   if (!ready || busy || toolOpen) return;
   lastPokePlan = activeKind.poke(event);
+  reactToPreviewPoke();
 }
 
 // ---------- Start ----------

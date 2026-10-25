@@ -26,14 +26,15 @@ const CharacterDesktop = {
 };
 
 // ---------- Local characters ----------
-// The picture of the expression on show (a poke's temporary one or the chosen one), fitted into the window.
-let localPacket = null;
+// The picture of the expression on show (a poke's temporary one, an automatic change's or the chosen one), fitted
+// into the window.
+let localPacket = null, localAuto = null;
 const localPokes = createPokeSession(() => showPicture());
 
 async function showPicture() {
   if (!localPacket) return;
   try {
-    await picturePlayer().show(await localImageURL(localPacket.entry, localPokes.temporaryExpression || localPacket.selection.expression));
+    await picturePlayer().show(await localImageURL(localPacket.entry, localPokes.temporaryExpression || localAuto || localPacket.selection.expression));
     fitPicture();
   } catch (error) {
     CharacterDesktop.error(error.message || error);
@@ -43,7 +44,7 @@ async function showPicture() {
 registerCharacterKind('local', {
   async apply(packet) {
     picturePlayer();
-    if (packet.entry.id !== localPacket?.entry.id) localPokes.reset();
+    if (packet.entry.id !== localPacket?.entry.id) { localPokes.reset(); localAuto = null; }
     localPacket = packet;
     imagePlayer.setTuning(packet.tuning);
     imagePlayer.setMirror(packet.mirror);
@@ -51,6 +52,7 @@ registerCharacterKind('local', {
   },
   unload() {
     localPokes.reset();
+    localAuto = null;
     imagePlayer?.hide();
     localPacket = null;
   },
@@ -61,9 +63,14 @@ registerCharacterKind('local', {
   },
   opaqueAt: (x, y) => !!imagePlayer?.opaqueAt(x, y),
   fit: () => { if (localPacket) fitPicture(); },
+  expressions: () => localPacket ? localExpressions(localPacket.entry) : [],
+  setAutoExpression(id) {
+    localAuto = id;
+    showPicture();
+  },
   test: {
     metrics: () => ({
-      key: localPacket ? localPacket.entry.id + ':local' : '', tempExpression: localPokes.temporaryExpression,
+      key: localPacket ? localPacket.entry.id + ':local' : '', tempExpression: localPokes.temporaryExpression, auto: localAuto,
       picture: imagePlayer?.url ? { transform: imagePlayer.img.style.transform, tuning: imagePlayer.tuning, mirror: imagePlayer.mirror } : null
     })
   }
@@ -80,6 +87,110 @@ function scheduleAutoPoke(seconds) {
   autoPokeTimer = seconds > 0 ? setInterval(autoPoke, seconds * 1000) : null;
 }
 
+// ---------- 滑鼠跟隨: the character leans toward the cursor, around its feet; the window stays put ----------
+const LEAN_MAX = 8;   // degrees, at strength 100
+let lean = 0, leanTarget = 0, leaning = false, cursors = 0;
+function leanToward(cursor) {
+  cursors++;
+  const strength = lastPacket?.follow || 0;
+  leanTarget = strength ? LEAN_MAX * strength / 100 * Math.tanh((cursor.x - innerWidth / 2) / Math.max(200, innerHeight)) : 0;
+  startLeaning();
+}
+function startLeaning() {
+  if (leaning || lean === leanTarget) return;
+  leaning = true;
+  requestAnimationFrame(stepLean);
+}
+function stepLean() {
+  lean += (leanTarget - lean) * 0.12;
+  if (Math.abs(leanTarget - lean) < 0.01) lean = leanTarget;
+  document.body.style.transform = lean ? 'rotate(' + lean.toFixed(3) + 'deg)' : '';
+  if (lean !== leanTarget) requestAnimationFrame(stepLean); else leaning = false;
+}
+// A point of the window as it is on the character before the lean (kinds work in the unleaned picture).
+function unlean(x, y) {
+  if (!lean) return { x, y };
+  const px = innerWidth / 2, py = innerHeight, a = -lean * Math.PI / 180, dx = x - px, dy = y - py;
+  return { x: px + dx * Math.cos(a) - dy * Math.sin(a), y: py + dx * Math.sin(a) + dy * Math.cos(a) };
+}
+
+// ---------- 互動音效: a poke's sound, and on every fifth poke the fifth's (if one is chosen) ----------
+let pokeCount = 0, lastSound = '';
+const soundURLs = new Map();
+async function playPokeSound() {
+  pokeCount++;
+  const sounds = lastPacket?.sounds, name = sounds && (pokeCount % 5 === 0 && sounds.fifth ? sounds.fifth : sounds.poke);
+  if (!name) return;
+  lastSound = name;
+  try {
+    if (!soundURLs.has(name)) soundURLs.set(name, window.desktopAPI.soundData(name).then(sound => {
+      if (!sound) throw new Error('missing');
+      return URL.createObjectURL(new Blob([sound.data], { type: sound.mime }));
+    }));
+    const audio = new Audio(await soundURLs.get(name));
+    audio.volume = (lastPacket?.volume ?? 70) / 100;
+    await audio.play();
+  } catch {
+    soundURLs.delete(name);
+  }
+}
+
+// ---------- 自動換表情 and 台詞 ----------
+// Every packet.autoFace seconds the character shows another of its expressions (its kind's expressions() and
+// setAutoExpression(); a kind without them keeps its look) until a poke brings back the chosen one. Lines
+// (packet.lines, null when off) show in a bubble above the character: an automatic line with each such change, or
+// every lines.seconds without them; a poke's line, and on every fifth poke the fifth's (the poke's if it has none).
+let autoFaceSeconds = 0, autoFaceTimer = null, autoExpression = null, autoKey = '';
+let autoLineSeconds = 0, autoLineTimer = null, lastLine = '';
+function setAutoExpression(id) {
+  autoExpression = id;
+  activeKind?.setAutoExpression?.(id);
+}
+function changeFace() {
+  if (pointerDown || petBusy || !activeKind) return;
+  const ids = activeKind.expressions?.() || [], current = autoExpression || lastPacket?.selection?.expression || ids[0];
+  const others = ids.filter(id => id !== current);
+  if (others.length) setAutoExpression(others[Math.floor(Math.random() * others.length)]);
+  say('auto');
+}
+function startAutoFace() {
+  clearInterval(autoFaceTimer);
+  autoFaceTimer = autoFaceSeconds > 0 ? setInterval(changeFace, autoFaceSeconds * 1000) : null;
+}
+function scheduleAuto(packet) {
+  const face = Number(packet.autoFace) || 0, lineSeconds = !face && packet.lines?.auto.length ? packet.lines.seconds : 0;
+  if (face !== autoFaceSeconds) { autoFaceSeconds = face; startAutoFace(); }
+  if (lineSeconds !== autoLineSeconds) {
+    autoLineSeconds = lineSeconds;
+    clearInterval(autoLineTimer);
+    autoLineTimer = lineSeconds ? setInterval(() => { if (!pointerDown) say('auto'); }, lineSeconds * 1000) : null;
+  }
+  // Another character or expression chosen, or no more changes: the chosen look again.
+  const key = JSON.stringify([packet.entry.id, packet.selection]);
+  if (autoExpression && (!face || key !== autoKey)) setAutoExpression(null);
+  autoKey = key;
+}
+
+// A line at random from the list (not the same one twice in a row), where its place says (lines.place, fractions of
+// the window) or else above the character's top: the first row, every 6 pixels, with something opaque, at its middle.
+function say(list) {
+  const lines = lastPacket?.lines;
+  const pool = !lines ? [] : list === 'fifth' && lines.fifth.length ? lines.fifth : lines[list === 'fifth' ? 'poke' : list];
+  if (!pool.length) return;
+  const choices = pool.length > 1 ? pool.filter(line => line !== lastLine) : pool;
+  lastLine = choices[Math.floor(Math.random() * choices.length)];
+  const place = lines.place;
+  window.desktopAPI.say(lastLine, place ? { x: Math.round(place.x * innerWidth), y: Math.round(place.y * innerHeight) } : characterTop());
+}
+function characterTop() {
+  for (let y = 0; y < innerHeight; y += 6) {
+    const xs = [];
+    for (let x = 0; x < innerWidth; x += 8) if (opaqueAt(x, y)) xs.push(x);
+    if (xs.length) return { x: Math.round((xs[0] + xs.at(-1)) / 2), y };
+  }
+  return { x: Math.round(innerWidth / 2), y: 0 };
+}
+
 // ---------- The character packet from the app ----------
 // Packets arriving while one is loading wait; only the newest is kept.
 async function applyPacket(packet) {
@@ -94,6 +205,9 @@ async function applyPacket(packet) {
     if (!kind) return;
     await kind.apply(packet);
     scheduleAutoPoke(Number(packet.autoPoke) || 0);
+    scheduleAuto(packet);
+    // Following stopped: back upright.
+    if (!packet.follow) { leanTarget = 0; startLeaning(); }
     document.title = '角色桌面 · ' + packet.entry.name;
   } catch (error) {
     CharacterDesktop.error(error.message || error);
@@ -105,21 +219,27 @@ async function applyPacket(packet) {
 
 // ---------- Pointer: hover, poke and drag ----------
 let lastPointer = null, pointerDown = null;
-const opaqueAt = (x, y) => !!activeKind?.opaqueAt(x, y);
+const opaqueAt = (x, y) => { const point = unlean(x, y); return !!activeKind?.opaqueAt(point.x, point.y); };
 
-// Tells the app whether to take mouse input (pointer over the character) or let it pass through.
-function updateHit() {
-  if (pointerDown) return;
-  window.desktopAPI.hit(!!lastPointer && opaqueAt(lastPointer.x, lastPointer.y));
+// Tells the app whether to take mouse input (pointer over the character) or let it pass through; moved: the mouse
+// really moved here (the app revives a window that stops hearing it).
+function updateHit(moved = false) {
+  if (pointerDown) { if (moved) window.desktopAPI.hit(true, true); return; }
+  window.desktopAPI.hit(!!lastPointer && opaqueAt(lastPointer.x, lastPointer.y), moved);
 }
 
+// A poke brings back the chosen expression at once (an automatic change waits a whole interval again).
 function pokePet(point) {
   if (petBusy || !activeKind || !lastPacket?.entry) return;
-  lastPokePlan = activeKind.poke(point);
+  if (autoExpression) setAutoExpression(null);
+  startAutoFace();
+  lastPokePlan = activeKind.poke(point && unlean(point.x, point.y));
+  playPokeSound();
+  say(pokeCount % 5 === 0 ? 'fifth' : 'poke');
 }
 
 function listenToPointer() {
-  window.addEventListener('mousemove', event => { lastPointer = { x: event.clientX, y: event.clientY }; updateHit(); });
+  window.addEventListener('mousemove', event => { lastPointer = { x: event.clientX, y: event.clientY }; updateHit(true); });
   window.addEventListener('mouseleave', () => { if (!pointerDown) { lastPointer = null; window.desktopAPI.hit(false); } });
   // The character moves under a still pointer too (breathing, poses), so the answer is checked again regularly.
   setInterval(() => { if (lastPointer) updateHit(); }, 100);
@@ -162,6 +282,7 @@ async function startPet() {
   await loadExtensionPages('pet');
   petReady = true;
   window.desktopAPI.onCharacter(applyPacket);
+  window.desktopAPI.onCursor(leanToward);
   window.desktopAPI.petReady();
   listenToPointer();
   let resizeTimer;
@@ -171,7 +292,12 @@ async function startPet() {
   });
   // Test hooks used by the self-tests; a kind adds its own metrics.
   window.desktopTest = {
-    getMetrics: () => ({ busy: petBusy, lastPlan: lastPokePlan, packets, ...activeKind?.test?.metrics?.() }),
+    getMetrics: () => ({ busy: petBusy, lastPlan: lastPokePlan, packets, follow: lastPacket?.follow || 0, sounds: lastPacket?.sounds || null, cursors, leanTarget, lastSound, pokeCount,
+      autoFace: autoFaceSeconds, autoLines: autoLineSeconds, autoExpression, lines: lastPacket?.lines || null, lastLine, ...activeKind?.test?.metrics?.() }),
+    leanToward,
+    changeFace,
+    sayAuto: () => say('auto'),
+    characterTop,
     poke: point => pokePet(point),
     autoPoke: () => ({ seconds: autoPokeSeconds, armed: !!autoPokeTimer }),
     autoPokeNow: () => autoPoke(),

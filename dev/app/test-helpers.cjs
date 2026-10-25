@@ -40,7 +40,8 @@ async function tracesOf(dataRoot, needles) {
 // window has become visible: the self-tests never show anything on screen.
 function pageHelpers({ getSettings, getPet, getPets, getState }) {
   const settings = getSettings();
-  const page = code => settings.webContents.executeJavaScript(code);
+  // A script that fails names itself (Electron alone only says that one failed).
+  const page = code => settings.webContents.executeJavaScript(code).catch(error => { throw new Error(error.message + '\n  script: ' + code.slice(0, 300)); });
   const petPage = (code, id) => getPet(id).webContents.executeJavaScript(code);
   const hidden = () => assert(!settings.isVisible() && getPets().every(id => !getPet(id).isVisible()), 'a window became visible');
   const idle = () => waitFor(() => page(`!!window.desktopSettingsTest && desktopSettingsTest.idle()`), 'settings idle');

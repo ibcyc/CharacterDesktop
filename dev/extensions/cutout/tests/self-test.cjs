@@ -62,7 +62,7 @@ async function run(ctx) {
   await drop('photo.png', 'image/png', photo);
   await waitFor(async () => (await state()).photo, 'cut out');
   check('cut out', [await state(), await alphaAt(200, 150), await alphaAt(4, 4), await tool('tool.pixelAt(200, 150).slice(0, 3)'), await page(`$('cut-queue').hidden`)],
-    [{ photo: true, width: 400, height: 300, undo: 0, redo: 0, brush: 'erase', edges: 'clean', trim: true, comparing: false, queue: ['ready'], index: 0 }, 255, 0, [32, 80, 192], true]);
+    [{ photo: true, width: 400, height: 300, undo: 0, redo: 0, brush: 'erase', edges: 'clean', trim: true, comparing: false, queue: ['ready'], index: 0, frames: 0 }, 255, 0, [32, 80, 192], true]);
   check('controls for a photo', await page(`[${shown('cut-drop')}, ${shown('cut-tools')}, ${shown('cut-options')}, $('cut-add').disabled, $('cut-save').disabled]`), [false, true, true, false, false]);
   check('places', await page(`(() => {
     const at = r => $(r).getBoundingClientRect(), stage = at('cut-stage'), tools = at('cut-tools'), options = at('cut-options'), actions = at('cut-add');
@@ -85,7 +85,7 @@ async function run(ctx) {
   await page(`$('cut-natural').click(); true`);
   await waitFor(async () => (await state()).photo && (await state()).edges === 'natural', 'cut out again with 自然 edges');
   check('自然 edges', [await state(), await alphaAt(200, 150), await alphaAt(12, 10)],
-    [{ photo: true, width: 400, height: 300, undo: 0, redo: 0, brush: 'restore', edges: 'natural', trim: true, comparing: false, queue: ['ready'], index: 0 }, 255, 0]);
+    [{ photo: true, width: 400, height: 300, undo: 0, redo: 0, brush: 'restore', edges: 'natural', trim: true, comparing: false, queue: ['ready'], index: 0, frames: 0 }, 255, 0]);
   await page(`$('cut-compare').click(); true`);
   check('compare', (await state()).comparing, true);
   await page(`$('cut-compare').click(); $('cut-clean').click(); true`);
@@ -141,6 +141,78 @@ async function run(ctx) {
   await waitFor(() => page(`!document.body.classList.contains('tool-mode')`), 'closed');
   check('✕ leaves the rest', [getState().library.length, getState().selection], [1, { characterId: 'L1', look: null, expression: '1' }]);
   check('nothing left from adding', fs.readdirSync(dataRoot).filter(name => name.startsWith('Import-')), []);
+
+  // 11. A JPG dropped on the App's window: its question offers 去背, which opens the editor with it.
+  await page(`(async () => {
+    const canvas = new OffscreenCanvas(400, 300), x = canvas.getContext('2d');
+    x.fillStyle = '#c03020'; x.fillRect(0, 0, 400, 300);
+    const data = new DataTransfer();
+    data.items.add(new File([await canvas.convertToBlob({ type: 'image/jpeg' })], 'holiday.jpg', { type: 'image/jpeg' }));
+    $('stage').dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true, clientX: 300, clientY: 300 }));
+    return true;
+  })()`);
+  await waitFor(() => page(`!$('drop-menu').hidden`), 'where to add');
+  await page(`[...$('drop-menu').children].find(button => button.textContent === '新角色').click(); true`);
+  await waitFor(() => page(`!$('dialog').hidden`), 'JPG question');
+  check('JPG question offers the tool', await page(`[...$('dialog-buttons').children].map(button => button.textContent)`), ['取消', '去背', '直接加入']);
+  await page(`$('dialog-buttons').querySelector('[data-value="tool:cutout"]').click(); true`);
+  await waitFor(() => page(`document.body.classList.contains('tool-mode')`), 'editor opened with the JPG');
+  await waitFor(async () => (await state()).queue.join() === 'ready', 'JPG cut out');
+  check('JPG in the editor', [(await state()).width, getState().library.length], [400, 1]);
+  await page(`$('cut-close').click(); true`);
+  await waitFor(() => page(`!document.body.classList.contains('tool-mode')`), 'closed again');
+
+  // 12. An animated GIF asks first. 逐格去背 cuts out every frame (no brushes for an animation) and adds or downloads an
+  // animated PNG; 只用第一格 treats it as a photo. The GIF is written here: 3 frames, a blue square moving over red.
+  const gifOf = (width, height, frames, delay) => {
+    const bytes = [...Buffer.from('GIF89a'), width & 255, width >> 8, height & 255, height >> 8, 0xf1, 0, 0, 0xc0, 0x30, 0x20, 0x20, 0x50, 0xc0, 255, 255, 255, 0, 0, 0,
+      0x21, 0xff, 11, ...Buffer.from('NETSCAPE2.0'), 3, 1, 0, 0, 0];
+    for (const pixels of frames) {
+      bytes.push(0x21, 0xf9, 4, 0, delay & 255, delay >> 8, 0, 0, 0x2c, 0, 0, 0, 0, width & 255, width >> 8, height & 255, height >> 8, 0, 2);
+      // LZW kept at 3-bit codes: a clear code before every two pixels, so the table never grows.
+      const codes = [];
+      for (let i = 0; i < pixels.length; i += 2) codes.push(4, ...pixels.slice(i, i + 2));
+      codes.push(5);
+      const packed = [];
+      let bits = 0, count = 0;
+      for (const code of codes) { bits |= code << count; count += 3; while (count >= 8) { packed.push(bits & 255); bits >>= 8; count -= 8; } }
+      if (count) packed.push(bits & 255);
+      for (let i = 0; i < packed.length; i += 255) bytes.push(Math.min(255, packed.length - i), ...packed.slice(i, i + 255));
+      bytes.push(0);
+    }
+    bytes.push(0x3b);
+    return Buffer.from(bytes);
+  };
+  const square = left => Array.from({ length: 60 * 40 }, (_, i) => (i % 60 >= left && i % 60 < left + 20 && Math.floor(i / 60) >= 10 && Math.floor(i / 60) < 30) ? 1 : 0);
+  const gif = gifOf(60, 40, [square(5), square(20), square(35)], 10);
+  const gifBlob = `Promise.resolve(new Blob([new Uint8Array(${JSON.stringify([...gif])})], { type: 'image/gif' }))`;
+  const apngFrames = file => { const png = fs.readFileSync(file), at = png.indexOf('acTL'); return [png.subarray(1, 4).toString(), at > 0 ? png.readUInt32BE(at + 4) : 0]; };
+  await page(`$('app-menu-toggle').click(); $('tools-toggle').click(); $('tools-menu').children[0].click(); true`);
+  await waitFor(() => page(`document.body.classList.contains('tool-mode')`), 'editor open for the GIF');
+  await drop('moving.gif', 'image/gif', gifBlob);
+  await waitFor(() => page(`!$('dialog').hidden`), 'animation question');
+  check('animation asks first', await page(`[$('dialog-message').textContent, [...$('dialog-buttons').children].map(button => button.textContent)]`), ['這是動圖（共 3 格）', ['取消', '只用第一格', '逐格去背']]);
+  await page(`$('dialog-buttons').querySelector('[data-value="all"]').click(); true`);
+  await waitFor(async () => (await state()).queue.join() === 'ready', 'every frame cut out');
+  check('every frame cut out', [(await state()).frames, (await state()).width, await page(`[${shown('cut-tools')}, ${shown('cut-options')}, $('cut-add').disabled, $('cut-save').disabled]`)], [3, 60, [false, true, false, false]]);
+  const savedAnimation = path.join(path.dirname(dataRoot), 'moving.png');
+  ctx.setFileTest({ saveFile: savedAnimation });
+  await tool('tool.save()');
+  check('downloaded as an animated PNG', apngFrames(savedAnimation), ['PNG', 3]);
+  await page(`$('cut-add').click(); [...$('cut-add-menu').children].find(button => button.textContent === '新角色').click(); true`);
+  await waitFor(() => getState().library.some(entry => entry.name === 'moving'), 'animation added');
+  const moving = getState().library.find(entry => entry.name === 'moving');
+  check('added as an animated character', [moving.files, apngFrames(path.join(dataRoot, 'Local', moving.folder, 'd.png'))], [{ 0: 'd.png' }, ['PNG', 3]]);
+  await waitFor(() => page(`document.body.classList.contains('tool-mode') ? false : true`), 'editor closed after adding its only picture');
+  await page(`$('app-menu-toggle').click(); $('tools-toggle').click(); $('tools-menu').children[0].click(); true`);
+  await waitFor(() => page(`document.body.classList.contains('tool-mode')`), 'editor open again for the GIF');
+  await drop('first.gif', 'image/gif', gifBlob);
+  await waitFor(() => page(`!$('dialog').hidden`), 'animation question again');
+  await page(`$('dialog-buttons').querySelector('[data-value="first"]').click(); true`);
+  await waitFor(async () => (await state()).queue.join() === 'ready', 'first frame cut out');
+  check('only the first frame, as a photo', [(await state()).frames, await page(shown('cut-tools'))], [0, true]);
+  await page(`$('cut-close').click(); true`);
+  await waitFor(() => page(`!document.body.classList.contains('tool-mode')`), 'closed after the GIF');
   check('no page errors', await page('!!window.playerFailed'), false);
   hidden();
   fs.writeFileSync(report, JSON.stringify({ ok: true, results }, null, 1));

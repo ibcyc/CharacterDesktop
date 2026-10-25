@@ -8,15 +8,23 @@ const os = require('node:os');
 const fs = require('node:fs');
 const { createStore } = require('./store.cjs');
 const { createPetWindow } = require('./pet-window.cjs');
-const { createLocal, isLocal, planFile, planFolder } = require('./local.cjs');
+const { createLocal, isLocal, planFile, planFolder, pictureExtension } = require('./local.cjs');
 const { loadExtensions } = require('./extensions.cjs');
 const pack = require('./pack.cjs');
 const profiles = require('./profiles.cjs');
+const i18n = require('./i18n.js');
+const { STRINGS_EN, PUNCTUATION_EN } = require('./strings-en.js');
 
 // ---------- Command line and folders ----------
 const argValue = name => process.argv.find(arg => arg.startsWith(name + '='))?.slice(name.length + 1);
 const selfTest = process.argv.includes('--self-test');
 const appRoot = app.isPackaged ? path.dirname(process.execPath) : __dirname;
+// The self-tests delete characters and reset everything, so they run only on a data folder of their own (the build
+// gives one); started without it, they never touch the user's Data.
+if (selfTest && !argValue('--data-dir')) {
+  process.stderr.write('--self-test needs --data-dir=<a throwaway folder>\n');
+  process.exit(2);
+}
 const dataRoot = argValue('--data-dir') ? path.resolve(argValue('--data-dir')) : path.join(appRoot, 'Data');
 const extensionsRoot = argValue('--extensions-dir') ? path.resolve(argValue('--extensions-dir')) : path.join(appRoot, 'Extensions');
 const store = createStore(dataRoot);
@@ -98,6 +106,9 @@ function lookKeyOf(selection) {
 // The character being edited shows exactly what the settings page shows; the others show their saved profile.
 const selectionOf = id => String(id) === currentId() ? state.selection : profiles.selectionFor(state.characters, findEntry(id), cleanLook);
 const heightOf = id => profiles.heightFor(state.characters, id, lookKeyOf(selectionOf(id)));
+// 滑鼠跟隨, 互動音效, 自動換表情 and 台詞 of the look on show (profiles.cleanInteraction).
+const interactionOf = id => profiles.interactionFor(state.characters, id, lookKeyOf(selectionOf(id)));
+const followsCursor = id => !activeGroupOf(id) && interactionOf(id).follow.on;
 // An extension character's own settings, checked by its extension.
 function optionsOf(id) {
   const entry = findEntry(id), extension = extensionOf(entry);
@@ -115,6 +126,31 @@ function persist() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { try { saveSettings(); } catch (error) { store.log(error); } }, 250);
 }
+
+// ---------- Language ----------
+// The pages translate themselves (shared/i18n.js); this process translates what it shows itself: the tray and the
+// file dialogs. Not chosen yet, the page asks at the first start; until then it is Traditional Chinese.
+const language = () => i18n.languageId(state.language) || i18n.DEFAULT_LANGUAGE;
+let translator = null, translatorLanguage = '';
+function t(text) {
+  if (translatorLanguage !== language()) {
+    translator = i18n.createTranslator();
+    if (language() === 'en') translator.add(STRINGS_EN, PUNCTUATION_EN);
+    translatorLanguage = language();
+  }
+  return translator.translate(text);
+}
+ipcMain.on('desktop:language', event => { event.returnValue = language(); });
+// 語言 (設定) or the first start's question: kept, then the settings page starts again in it.
+ipcMain.handle('desktop:language-set', (event, id) => {
+  if (!fromSettings(event) || !i18n.languageId(id)) return false;
+  const changed = id !== language();
+  state.language = id;
+  persist();
+  updateTray();
+  if (changed) reloadSettings();
+  return true;
+});
 
 // ---------- Settings window and tray ----------
 function safeWindow(win) {
@@ -184,7 +220,7 @@ function toggleVisible() {
   publish();
   persist();
 }
-const trayTip = () => '角色桌面：左鍵' + (state.visible ? '全隱藏' : '恢復顯示') + ' · 右鍵開啟設定';
+const trayTip = () => t(state.visible ? '角色桌面：左鍵全隱藏 · 右鍵開啟設定' : '角色桌面：左鍵恢復顯示 · 右鍵開啟設定');
 function updateTray() { if (tray && !tray.isDestroyed()) tray.setToolTip(trayTip()); }
 function createTray() {
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'icon.png')));
@@ -195,11 +231,14 @@ function createTray() {
 
 // ---------- Characters on the desktop ----------
 // Everything one desktop window needs to draw its character.
+// Out with a group, a character neither follows the cursor nor speaks (its settings stay).
 function packetFor(id) {
-  const entry = findEntry(id) || null;
+  const entry = findEntry(id) || null, inGroup = !!activeGroupOf(id), { follow, sounds, autoFace, lines } = interactionOf(id);
   return {
     entry, selection: selectionOf(id), options: optionsOf(id), mirror: profiles.mirrorFor(state.characters, id), autoPoke: profiles.autoPokeOf(desktopOf(id)),
-    tuning: tunable(entry) ? profiles.tuningFor(state.characters, id) : null, locked: desktopOf(id).locked
+    tuning: tunable(entry) ? profiles.tuningFor(state.characters, id) : null, locked: desktopOf(id).locked,
+    follow: !inGroup && follow.on ? follow.strength : 0, sounds: sounds.on ? { poke: sounds.poke, fifth: sounds.fifth } : null,
+    volume: profiles.cleanVolume(state.volume), autoFace: autoFace.on ? autoFace.seconds : 0, lines: !inGroup && lines.on ? lines : null
   };
 }
 
@@ -224,6 +263,8 @@ function createPet(id, slot) {
     }
   });
   pets.set(id, pet);
+  // A window gone (as when the App closes, its windows go first) leaves the list at once, so nothing touches it.
+  pet.window.on('closed', () => { if (pets.get(id) === pet) pets.delete(id); });
 }
 
 // ---------- Groups (組合) ----------
@@ -468,6 +509,8 @@ function desktopOptions() {
       ? { id: unit.key, group: true, name: unit.group.name, locked: shownMembers(unit.group).every(id => desktopOf(id).locked), members: shownMembers(unit.group).map(id => ({ id, locked: desktopOf(id).locked })) }
       : { id: unit.id, locked: desktopOf(unit.id).locked }),
     groups: groupsForSettings(),
+    // The look it is for: a change from the page made for another look (just switched) is not kept.
+    interaction: id ? { id, look: lookKeyOf(state.selection), ...interactionOf(id) } : null,
     editing: editing && { id: editing.groupId, name: groupOf(editing.groupId).name, members: groupMembers(groupOf(editing.groupId)) }
   };
 }
@@ -643,8 +686,8 @@ async function pickLocal(kind) {
   if (selfTest) return { ok: false, message: 'self-test: no file dialog' };
   const folder = kind === 'folder';
   const result = await dialog.showOpenDialog(settings, folder
-    ? { title: '選擇角色資料夾', properties: ['openDirectory'] }
-    : { title: '選擇角色圖片', properties: ['openFile'], filters: [{ name: '圖片', extensions: ['png', 'webp', 'svg', 'gif'] }] });
+    ? { title: t('選擇角色資料夾'), properties: ['openDirectory'] }
+    : { title: t('選擇角色圖片'), properties: ['openFile'], filters: [{ name: t('圖片'), extensions: ['png', 'webp', 'svg', 'gif', 'jpg', 'jpeg'] }] });
   if (result.canceled || !result.filePaths[0]) return { ok: false, cancelled: true };
   return stageLocal(kind, result.filePaths[0]);
 }
@@ -653,7 +696,9 @@ function stageLocal(kind, from) {
   try {
     const plan = kind === 'folder' ? planFolder(from) : planFile(from);
     pendingLocal = { kind: kind === 'folder' ? 'folder' : 'file', from };
-    return { ok: true, kind: pendingLocal.kind, label: path.basename(from), skipped: plan.skipped };
+    // A JPG default picture has no transparency; the page reminds the user before adding.
+    const opaque = /\.jpe?g$/i.test(plan.files[0].name);
+    return { ok: true, kind: pendingLocal.kind, label: path.basename(from), skipped: plan.skipped, opaque };
   } catch (error) {
     return { ok: false, message: String(error.message || error) };
   }
@@ -699,7 +744,7 @@ async function exportPack() {
   let file = fileTest?.exportFile;
   if (!file) {
     const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const result = await dialog.showSaveDialog(settings, { title: '匯出角色', defaultPath: path.join(app.getPath('documents'), '角色-' + day + '.cdpack'), filters: [{ name: '角色包', extensions: ['cdpack'] }] });
+    const result = await dialog.showSaveDialog(settings, { title: t('匯出角色'), defaultPath: path.join(app.getPath('documents'), t('角色-' + day + '.cdpack')), filters: [{ name: t('角色包'), extensions: ['cdpack'] }] });
     if (result.canceled || !result.filePath) return { ok: false, cancelled: true };
     file = result.filePath;
   }
@@ -761,7 +806,7 @@ async function importPack() {
   if (downloadJob) return { ok: false, message: '下載進行中，請稍後再匯入。' };
   let file = fileTest?.importFile;
   if (!file) {
-    const result = await dialog.showOpenDialog(settings, { title: '匯入角色包', properties: ['openFile'], filters: [{ name: '角色包', extensions: ['cdpack'] }] });
+    const result = await dialog.showOpenDialog(settings, { title: t('匯入角色包'), properties: ['openFile'], filters: [{ name: t('角色包'), extensions: ['cdpack'] }] });
     if (result.canceled || !result.filePaths[0]) return { ok: false, cancelled: true };
     file = result.filePaths[0];
   }
@@ -825,7 +870,9 @@ function stateForSettings() {
     sources: extensions.map(extension => ({ id: extension.id, name: extension.name, site: extension.site, author: extension.author, credits: extension.credits, downloads: downloaders().includes(extension) })),
     extensionProblems,
     tuning: { defaults: profiles.TUNING_DEFAULTS, limits: profiles.TUNING_LIMITS },
-    ui: uiNow(), uiDefaults: profiles.UI_DEFAULTS, glass
+    ui: uiNow(), uiDefaults: profiles.UI_DEFAULTS, glass,
+    // Asked once, at the first start (not in the self-tests, which ask it themselves).
+    language: { current: language(), choices: i18n.LANGUAGES, ask: !state.language && !selfTest }
   };
 }
 
@@ -844,7 +891,7 @@ ipcMain.handle('desktop:state', event => {
 // Extensions: the scripts, styles and markup their parts of a page need, and the functions those parts may call.
 ipcMain.handle('desktop:extension-pages', (event, page) => {
   if ((!fromSettings(event) && !petFrom(event)) || !['settings', 'pet'].includes(page)) return [];
-  return extensions.map(extension => extension.pages[page]);
+  return extensions.map(extension => ({ ...extension.pages[page], strings: extension.strings[language()] || {} }));
 });
 ipcMain.handle('desktop:extension-call', async (event, id, name, args) => {
   if (!fromSettings(event) && !petFrom(event)) return null;
@@ -947,13 +994,28 @@ ipcMain.handle('desktop:character-options', (event, id, value) => {
 });
 // Local characters: choosing, adding, renaming, opening the folder, fine-tuning, and their pictures for the pages.
 ipcMain.handle('desktop:local-pick', (event, kind) => fromSettings(event) ? pickLocal(kind) : null);
-// A picture made on the page (PNG bytes, such as a tool's result) becomes a local character, like a single picture,
-// or with `characterId` the next expression of that local character, which is then shown with it.
+// The single picture chosen in the file dialog, for a tool the user would rather open it in: { name, type, data }.
+ipcMain.handle('desktop:local-pending-picture', event => {
+  if (!fromSettings(event) || pendingLocal?.kind !== 'file') return null;
+  try {
+    const data = fs.readFileSync(pendingLocal.from);
+    const type = { '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[path.extname(pendingLocal.from).toLowerCase()];
+    return type && data.length <= 20 * 1024 * 1024 ? { name: path.basename(pendingLocal.from), type, data: new Uint8Array(data) } : null;
+  } catch (error) {
+    store.log(error);
+    return null;
+  }
+});
+// A picture from the page (a tool's result, or one dropped on the preview; any accepted format, told by its bytes)
+// becomes a local character, like a single picture, or with `characterId` the next expression of that local
+// character, which is then shown with it.
 ipcMain.handle('desktop:add-picture', (event, name, data, characterId) => {
   if (!fromSettings(event) || !(data instanceof Uint8Array) || downloadJob) return { ok: false, message: '無法加入。' };
   const into = characterId ? findEntry(characterId) : null;
   if (characterId && !isLocal(into)) return { ok: false, message: '找不到這個角色。' };
-  const temp = path.join(dataRoot, 'Import-' + process.pid), file = path.join(temp, 'd.png');
+  const ext = pictureExtension(data);
+  if (!ext) return { ok: false, message: '只接受 png、webp、svg、gif、jpg 圖片。' };
+  const temp = path.join(dataRoot, 'Import-' + process.pid), file = path.join(temp, 'd' + ext);
   try {
     fs.mkdirSync(temp, { recursive: true });
     fs.writeFileSync(file, data);
@@ -1062,8 +1124,10 @@ ipcMain.handle('desktop:reset-all', event => {
     }
   }
   editing = null;
+  // The language stays: the App is as just installed, in the language it is read in.
+  const chosen = state.language;
   for (const key of Object.keys(state)) delete state[key];
-  Object.assign(state, freshState());
+  Object.assign(state, freshState(), chosen ? { language: chosen } : {});
   clearTimeout(saveTimer);
   try {
     store.write('library.json', library);
@@ -1160,9 +1224,106 @@ ipcMain.handle('desktop:reset-characters', event => {
   return true;
 });
 
+// ---------- 滑鼠跟隨 and 互動音效 ----------
+// Per character and look: how strongly it leans toward the cursor, the sounds of its pokes, 自動換表情 and its lines
+// (台詞), each with its switch (profiles.cleanInteraction).
+ipcMain.handle('desktop:interaction', (event, id, value) => {
+  if (!fromKnownCharacter(event, id) || !value || typeof value !== 'object') return null;
+  const key = lookKeyOf(selectionOf(id));
+  if (String(value.look) !== key) return null;
+  const profile = profileOf(id), looks = profile.interaction ??= {}, interaction = profiles.cleanInteraction(value);
+  if (profiles.isDefaultInteraction(interaction)) delete looks[key]; else looks[key] = interaction;
+  if (!Object.keys(looks).length) delete profile.interaction;
+  persist();
+  publish();
+  return interaction;
+});
+// 氣泡位置 in the lines window: the character as it is on the desktop (a picture of its window), the window's size and
+// where its bubble goes by itself (the top of the character). Null when it is not on the desktop.
+const withinMs = (promise, ms, fallback) => Promise.race([promise.catch(() => fallback), new Promise(resolve => setTimeout(resolve, ms, fallback))]);
+ipcMain.handle('desktop:bubble-stage', async (event, id) => {
+  const pet = fromKnownCharacter(event, id) && pets.get(String(id));
+  if (!pet || !pet.ready || pet.window.isDestroyed()) return null;
+  const { width, height } = pet.bounds(), contents = pet.window.webContents;
+  const [image, top] = await Promise.all([
+    withinMs(contents.capturePage().then(picture => picture.isEmpty() ? '' : picture.toDataURL()), 2000, ''),
+    withinMs(contents.executeJavaScript('characterTop()'), 2000, null)
+  ]);
+  return { width, height, image, top };
+});
+// 台詞: a character says a line in a bubble above it; point is where its tail points, in the character's window.
+ipcMain.on('desktop:say', (event, text, point) => {
+  const pet = petFrom(event)?.pet;
+  if (pet && typeof text === 'string' && text && point && Number.isFinite(point.x) && Number.isFinite(point.y)) pet.say(text.slice(0, profiles.LINE_LENGTH), point);
+});
+// The sound library: the files in Data\Sounds, put there by the user (打開資料夾).
+const soundsRoot = path.join(dataRoot, 'Sounds');
+const SOUND_TYPES = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.flac': 'audio/flac' };
+function listSounds() {
+  try {
+    return fs.readdirSync(soundsRoot, { withFileTypes: true }).filter(item => item.isFile() && profiles.soundName(item.name)).map(item => item.name).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  } catch { return []; }
+}
+const soundsState = () => ({ sounds: listSounds(), volume: profiles.cleanVolume(state.volume) });
+ipcMain.handle('desktop:sounds', event => fromSettings(event) ? soundsState() : null);
+// A sound's bytes, for the settings page (to hear it) and the desktop pages.
+ipcMain.handle('desktop:sound', (event, name) => {
+  if ((!fromSettings(event) && !petFrom(event)) || !profiles.soundName(name) || !listSounds().includes(name)) return null;
+  try {
+    const file = path.join(soundsRoot, name);
+    if (fs.statSync(file).size > 20 * 1024 * 1024) return null;
+    return { mime: SOUND_TYPES[path.extname(name).toLowerCase()], data: fs.readFileSync(file) };
+  } catch (error) { store.log(error); return null; }
+});
+// A sound deleted: no character (nor group) keeps it.
+ipcMain.handle('desktop:sound-delete', (event, name) => {
+  if (!fromSettings(event) || !profiles.soundName(name) || !listSounds().includes(name)) return null;
+  try { fs.rmSync(path.join(soundsRoot, name), { force: true }); } catch (error) { store.log(error); return null; }
+  const forget = profile => {
+    for (const { sounds } of Object.values(profile?.interaction || {})) for (const key of ['poke', 'fifth']) if (sounds?.[key] === name) sounds[key] = '';
+  };
+  for (const profile of Object.values(state.characters)) forget(profile);
+  for (const group of state.groups) for (const profile of Object.values(group.profiles)) forget(profile);
+  for (const active of Object.values(state.active)) for (const profile of Object.values(active.previous)) forget(profile);
+  persist();
+  publish();
+  return soundsState();
+});
+ipcMain.handle('desktop:sounds-open', event => {
+  if (!fromSettings(event)) return false;
+  fs.mkdirSync(soundsRoot, { recursive: true });
+  if (!selfTest) shell.openPath(soundsRoot);
+  return true;
+});
+ipcMain.handle('desktop:volume', (event, value) => {
+  if (!fromSettings(event)) return null;
+  state.volume = profiles.cleanVolume(value);
+  persist();
+  publish();
+  return state.volume;
+});
+
 // ---------- IPC: desktop character pages ----------
 ipcMain.on('desktop:open-settings', event => { const from = petFrom(event); if (from) editFromDesktop(from.id); });
-ipcMain.on('desktop:hit', (event, over) => petFrom(event)?.pet.setPointerOverCharacter(!!over));
+ipcMain.on('desktop:hit', (event, over, moved) => {
+  const pet = petFrom(event)?.pet;
+  if (!pet) return;
+  if (moved) pet.pointerMoved();
+  pet.setPointerOverCharacter(!!over);
+});
+// The mouse moves over character windows, yet none of their pages has heard of it for a while: they have lost the
+// mouse (a Windows quirk of click-through windows) and are revived. Where windows overlap, only one hears the mouse,
+// so one that does means all is well. Returns the ids revived.
+function reviveStuck(cursor, now = Date.now()) {
+  if (quitting || !state.visible) return [];
+  const under = [...pets].filter(([, pet]) => {
+    if (pet.window.isDestroyed() || pet.isDragging()) return false;
+    const { x, y, width, height } = pet.bounds();
+    return cursor.x >= x && cursor.x < x + width && cursor.y >= y && cursor.y < y + height;
+  });
+  if (under.some(([, pet]) => now - pet.lastMove <= 700)) return [];
+  return under.filter(([, pet]) => pet.revive()).map(([id]) => id);
+}
 // A dragged character moves with the pointer; a member of a group out moves with every member on the desktop (not
 // while the group is edited: then each member is placed by itself).
 let dragging = [];
@@ -1223,10 +1384,10 @@ async function runSelfTest() {
   try {
     await require('./self-test.cjs').run({
       app, getPet, getPets: () => [...pets.keys()], getStack: () => [...lastStack], getRaised: () => [...lastRaised],
-      restack: options => stackPets(options), isDragging: id => !!pets.get(String(id))?.isDragging(),
+      restack: options => stackPets(options), isDragging: id => !!pets.get(String(id))?.isDragging(), getSaid: id => pets.get(String(id))?.said() || null,
       getTray: trayTip, clickTray: button => (button === 'right' ? showSettings() : toggleVisible()),
       getSettings: showSettings, getState: stateForSettings, stageLocal, setFileTest: value => { fileTest = value; }, report, dataRoot, extensionsRoot,
-      installCalls, shortcutFile: () => path.join(path.dirname(dataRoot), 'Desktop', 'CharacterDesktop.lnk'),
+      reviveStuck, installCalls, shortcutFile: () => path.join(path.dirname(dataRoot), 'Desktop', 'CharacterDesktop.lnk'),
       helpers: require('./test-helpers.cjs')
     });
   } catch (error) {
@@ -1262,17 +1423,40 @@ if (!app.requestSingleInstanceLock() && !selfTest) {
     if (!selfTest && (!process.argv.includes('--autostart') || !shownLibrary().length || askUninstall)) showSettings();
     // The entry in Settings › Apps follows the App's folder and version.
     if (!selfTest) install.register().catch(error => store.log(error));
-    // Other always-on-top windows can push the characters down, so they are stacked again every two seconds.
+    // Other always-on-top windows can push the characters down, so they are stacked again every two seconds
+    // (not while the App is closing).
     setInterval(() => {
-      if (!state.visible) return;
+      if (!state.visible || quitting) return;
       stackPets({ gentle: true });
       for (const pet of pets.values()) if (pet.window.isMinimized()) pet.window.restore();
     }, 2000).unref();
+    // Only a moving mouse is looked at: a still one says nothing about a window's mouse.
+    let lastCursor = null;
+    setInterval(() => {
+      const cursor = screen.getCursorScreenPoint();
+      if (lastCursor && (cursor.x !== lastCursor.x || cursor.y !== lastCursor.y)) reviveStuck(cursor);
+      lastCursor = cursor;
+    }, 300).unref();
+    // 滑鼠跟隨: while characters on the desktop follow the cursor, where it is goes to them 30 times a second
+    // (relative to each window), only when it moved or the followers changed.
+    let lastFollow = '';
+    setInterval(() => {
+      if (quitting) return;
+      const followers = [...pets].filter(([id, pet]) => state.visible && !pet.window.isDestroyed() && followsCursor(id));
+      if (!followers.length) { lastFollow = ''; return; }
+      const cursor = screen.getCursorScreenPoint(), key = cursor.x + ',' + cursor.y + ':' + followers.map(([id]) => id + '@' + JSON.stringify(pets.get(id).bounds())).join();
+      if (key === lastFollow) return;
+      lastFollow = key;
+      for (const [, pet] of followers) {
+        const bounds = pet.bounds();
+        pet.window.webContents.send('desktop:cursor', { x: cursor.x - bounds.x, y: cursor.y - bounds.y });
+      }
+    }, 33).unref();
     screen.on('display-removed', () => { for (const pet of pets.values()) pet.keepOnDisplay(); });
     if (selfTest) await runSelfTest();
   }).catch(error => {
     store.log(error);
-    if (!selfTest) dialog.showErrorBox('角色桌面無法啟動', String(error.message || error));
+    if (!selfTest) dialog.showErrorBox(t('角色桌面無法啟動'), t(String(error.message || error)));
     app.exit(1);
   });
 }

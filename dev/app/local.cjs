@@ -5,14 +5,16 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const FORMATS = { '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.gif': 'image/gif' };
+// JPG has no transparency: such a character shows its whole picture (the page reminds the user before adding).
+const FORMATS = { '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.gif': 'image/gif', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_NAME_LENGTH = 40;
-const FILE_NAME = /^(?:(d)|e([1-9]\d?))(\.(?:png|webp|svg|gif))$/i;   // d, e1 … e99
+const FILE_NAME = /^(?:(d)|e([1-9]\d?))(\.(?:png|webp|svg|gif|jpe?g))$/i;   // d, e1 … e99
 
 class LocalError extends Error {}
 
 function isLocal(entry) { return entry?.kind === 'local'; }
+const ONLY_PICTURES = '只接受 png、webp、svg、gif、jpg 圖片。';
 function formatOf(file) { return FORMATS[path.extname(file).toLowerCase()] || ''; }
 
 // Whether the bytes really are a picture of that format.
@@ -22,7 +24,13 @@ function looksLike(data, ext) {
   if (ext === '.gif') return /^GIF8[79]a/.test(head.toString('latin1'));
   if (ext === '.webp') return head.toString('latin1', 0, 4) === 'RIFF' && head.toString('latin1', 8, 12) === 'WEBP';
   if (ext === '.svg') return /<svg[\s>]/i.test(data.subarray(0, 4096).toString('utf8'));
+  if (ext === '.jpg' || ext === '.jpeg') return head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
   return false;
+}
+// The file extension that bytes of an accepted picture call for ('' if they are none), for pictures without a name.
+function pictureExtension(data) {
+  const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  return ['.png', '.gif', '.webp', '.jpg', '.svg'].find(ext => looksLike(bytes, ext)) || '';
 }
 
 function cleanName(value) {
@@ -35,7 +43,7 @@ function cleanName(value) {
 // A single picture always becomes the default look (d), whatever it was called.
 function planFile(file) {
   const ext = path.extname(file).toLowerCase();
-  if (!FORMATS[ext]) throw new LocalError('只接受 png、webp、svg、gif 圖片。');
+  if (!FORMATS[ext]) throw new LocalError(ONLY_PICTURES);
   return { files: { 0: { from: file, name: 'd' + ext } }, skipped: [] };
 }
 
@@ -51,7 +59,7 @@ function planFolder(folder) {
     files[id] = { from: path.join(folder, item.name), name, original: item.name };
   }
   if (twice.length) throw new LocalError('同一張圖有兩個檔案，請只留一個：' + twice.join('；'));
-  if (!Object.keys(files).length) throw new LocalError('資料夾裡沒有可用的檔案（需要 d，表情是 e1、e2…；格式 png、webp、svg、gif），已取消。');
+  if (!Object.keys(files).length) throw new LocalError('資料夾裡沒有可用的檔案（需要 d，表情是 e1、e2…；格式 png、webp、svg、gif、jpg），已取消。');
   if (!files[0]) throw new LocalError('資料夾裡缺少 d（預設樣子），已取消。');
   return { files, skipped };
 }
@@ -105,7 +113,7 @@ function createLocal(root) {
   // One picture added as the next free expression (e1 … e99) of a local character: the new entry and its id.
   function addExpression(entry, file) {
     const ext = path.extname(file).toLowerCase(), size = fs.statSync(file).size;
-    if (!FORMATS[ext]) throw new LocalError('只接受 png、webp、svg、gif 圖片。');
+    if (!FORMATS[ext]) throw new LocalError(ONLY_PICTURES);
     if (size > MAX_FILE_BYTES) throw new LocalError('圖片超過 20 MB。');
     const data = fs.readFileSync(file);
     if (!looksLike(data, ext)) throw new LocalError('不是有效的圖片。');
@@ -138,4 +146,4 @@ function createLocal(root) {
   };
 }
 
-module.exports = { createLocal, isLocal, cleanName, planFile, planFolder };
+module.exports = { createLocal, isLocal, cleanName, planFile, planFolder, pictureExtension };

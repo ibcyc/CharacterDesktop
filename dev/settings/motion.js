@@ -38,6 +38,11 @@
     if (button && !button.disabled && !button.closest('.pop-in')) animate(button, { scale: { from: 0.95, to: 1 }, duration: 380, ease: 'outBack(2.2)' });
   });
 
+  // The sound library rises out of its round button.
+  new MutationObserver(() => {
+    if (!$('sounds-panel').hidden) animate('#sounds-panel', { opacity: { from: 0 }, translateY: { from: 8 }, duration: 240, ease: 'outCubic' });
+  }).observe($('sounds-panel'), { attributes: true, attributeFilter: ['hidden'] });
+
   // The saved groups rise out of their round button.
   new MutationObserver(() => {
     if (!$('groups-panel').hidden) animate('#groups-panel', { opacity: { from: 0 }, translateY: { from: 8 }, duration: 240, ease: 'outCubic' });
@@ -74,13 +79,15 @@
     });
   }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-  // A question's card rises in over the dimmed page.
-  new MutationObserver(() => {
-    if (!$('dialog').hidden) {
-      animate('#dialog', { opacity: { from: 0 }, duration: 180, ease: 'outQuad' });
-      animate('#dialog .dialog', { opacity: { from: 0 }, scale: { from: 0.94 }, translateY: { from: 8 }, duration: 260, ease: 'outCubic' });
-    }
-  }).observe($('dialog'), { attributes: true, attributeFilter: ['hidden'] });
+  // A question's card, and the lines window, rise in over the dimmed page.
+  for (const id of ['dialog', 'lines-dialog']) {
+    new MutationObserver(() => {
+      if (!$(id).hidden) {
+        animate('#' + id, { opacity: { from: 0 }, duration: 180, ease: 'outQuad' });
+        animate('#' + id + ' .dialog', { opacity: { from: 0 }, scale: { from: 0.94 }, translateY: { from: 8 }, duration: 260, ease: 'outCubic' });
+      }
+    }).observe($(id), { attributes: true, attributeFilter: ['hidden'] });
+  }
 
   // The dock's panels (download, file, an extension's) grow out of their round buttons.
   new MutationObserver(records => {
